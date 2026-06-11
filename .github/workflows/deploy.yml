@@ -1,0 +1,30 @@
+name: Deploy to VM when push
+
+# Controls when the action will run. 
+on:
+  # Triggers the workflow on push events but only for the master branch
+  push:
+    branches: [ master ]
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  # This workflow contains a single job called "build"
+  build:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+    - name: Deploy using ssh
+      uses: appleboy/ssh-action@master
+      with:
+        host: ${{ secrets.VM_HOST }}
+        username: ${{ secrets.VM_USERNAME }}
+        key: ${{ secrets.VM_KEY }}
+        port: 22
+        script: |
+          cd ~/ipmr-telemetry-worker
+          git pull origin master
+          npm install --omit=dev
+          pm2 startOrReload ecosystem.config.js --update-env
+          pm2 save
