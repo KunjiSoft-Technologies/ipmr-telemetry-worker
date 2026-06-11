@@ -18,9 +18,9 @@ jobs:
     - name: Deploy using ssh
       uses: appleboy/ssh-action@master
       with:
-        host: ${{ secrets.VM_HOST }}
-        username: ${{ secrets.VM_USERNAME }}
-        key: ${{ secrets.VM_KEY }}
+        host: ${{ secrets.MQTT_HOST }}
+        username: ${{ secrets.MQTT_USERNAME }}
+        key: ${{ secrets.MQTT_KEY }}
         port: 22
         script: |
           cd ~/ipmr-telemetry-worker
