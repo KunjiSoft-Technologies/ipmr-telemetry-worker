@@ -21,7 +21,6 @@ jobs:
         host: ${{ secrets.MQTT_HOST }}
         username: ${{ secrets.MQTT_USERNAME }}
         key: ${{ secrets.MQTT_KEY }}
-        passphrase: ${{ secrets.PASSPHRASE }}
         port: 22
         script: |
           cd ~/ipmr-telemetry-worker
