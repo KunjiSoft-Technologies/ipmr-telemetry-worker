@@ -25,6 +25,7 @@ jobs:
         script: |
           cd ~/ipmr-telemetry-worker
           git pull origin master
+          cp ~/rest-middleware/utils/config/key.json ./service-account.json || cp ~/industrialpmr-rest-middleware/utils/config/key.json ./service-account.json || true
           npm install --omit=dev
           pm2 startOrReload ecosystem.config.js --update-env
           pm2 save
