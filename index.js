@@ -20,7 +20,9 @@ const subscriptionName = process.env.PUBSUB_SUBSCRIPTION_NAME || 'ipmr-v2-record
 console.log(`Starting ipmr-telemetry-worker...`);
 console.log(`Listening to Pub/Sub Subscription: ${subscriptionName}`);
 
-const subscription = pubsub.subscription(subscriptionName);
+const subscription = pubsub.subscription(subscriptionName, {
+    enableMessageOrdering: true
+});
 
 /**
  * Message handler for incoming Pub/Sub telemetry packets.
