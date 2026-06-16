@@ -11,7 +11,8 @@ const {
     processPhaseValues,
     processDigitalValues,
     processValues,
-    processDirectTelemetry
+    processDirectTelemetry,
+    touchReports
 } = require('./services/telemetryProcessor');
 const { processAlerts } = require('./services/alertManager');
 const { normalizePayload } = require('./utils/payloadNormalizer');
@@ -102,6 +103,9 @@ async function handleMessage(message) {
             if (payload.production !== undefined || payload.kwhr !== undefined) {
                 await processDirectTelemetry(database, uid, unit, connection.type, connection.id, payload, unix, _unit);
             }
+
+            // Always touch reports so the total node exists even with all-zero data
+            await touchReports(database, uid, unit, connection.type, connection.id, unix, _unit);
         }
 
         // 9. Evaluate alerts

@@ -1222,6 +1222,27 @@ async function processDirectTelemetry(database, uid, unit, connectionType, conne
     }
 }
 
+/**
+ * Always called for every packet to ensure the daily/hourly report total node
+ * exists even when there is no production or consumption data.
+ * Passes 0 values so increment(0) creates the structure without changing totals.
+ */
+async function touchReports(database, uid, unit, connectionType, connectionId, unix, _unit) {
+    const promises = [];
+
+    if (connectionType === 'machines') {
+        promises.push(
+            countProduction(database, connectionId, 0, 0, uid, unit, unix, _unit)
+        );
+    }
+
+    promises.push(
+        countElectricity(database, connectionId, 0, 0, uid, unit, unix, _unit, connectionType)
+    );
+
+    await Promise.all(promises);
+}
+
 module.exports = {
     checkDuplicate,
     verifySequence,
@@ -1229,6 +1250,7 @@ module.exports = {
     processPhaseValues,
     processDigitalValues,
     processValues,
-    processDirectTelemetry
+    processDirectTelemetry,
+    touchReports
 };
 

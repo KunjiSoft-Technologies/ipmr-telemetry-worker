@@ -125,6 +125,34 @@ function normalizePayload(raw) {
         normalized.analog_values = av;
     }
 
+    // Normalize digital_values
+    if (normalized.digital_values && typeof normalized.digital_values === 'object') {
+        const dv = {};
+        for (const [signal, signalData] of Object.entries(normalized.digital_values)) {
+            let rawLogs = [];
+            if (Array.isArray(signalData)) {
+                rawLogs = signalData;
+            } else if (signalData && typeof signalData === 'object') {
+                rawLogs = signalData.v || signalData.values || [];
+            }
+
+            if (Array.isArray(rawLogs)) {
+                dv[signal] = rawLogs.map(entry => {
+                    if (entry && typeof entry === 'object') {
+                        return {
+                            high: entry.h !== undefined ? entry.h : (entry.high !== undefined ? entry.high : null),
+                            low: entry.l !== undefined ? entry.l : (entry.low !== undefined ? entry.low : null)
+                        };
+                    }
+                    return entry;
+                }).filter(entry => entry && entry.high !== null);
+            } else {
+                dv[signal] = [];
+            }
+        }
+        normalized.digital_values = dv;
+    }
+
     return normalized;
 }
 

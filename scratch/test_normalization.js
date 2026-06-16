@@ -35,7 +35,7 @@ const minifiedPayload = {
         bat_state: 'no_battery'
     },
     dv: {
-        X1: { mode: 1, values: [] }
+        X1: { mode: 1, values: [ { h: 1234567, l: 1234568 } ] }
     }
 };
 
@@ -100,7 +100,7 @@ function runTests() {
         assert.strictEqual(normalized.analog_values.supply_voltage.max, 17.7);
 
         console.log('Verifying digital_values...');
-        assert.deepStrictEqual(normalized.digital_values.X1, { mode: 1, values: [] });
+        assert.deepStrictEqual(normalized.digital_values.X1, [ { high: 1234567, low: 1234568 } ]);
 
         console.log('\nVerifying standard payload backward compatibility...');
         const unchanged = normalizePayload(standardPayload);
