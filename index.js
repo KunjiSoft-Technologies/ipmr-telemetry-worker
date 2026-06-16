@@ -9,7 +9,8 @@ const {
     verifySequence,
     trackTemperature,
     processPhaseValues,
-    processDigitalValues
+    processDigitalValues,
+    processValues
 } = require('./services/telemetryProcessor');
 const { processAlerts } = require('./services/alertManager');
 const { normalizePayload } = require('./utils/payloadNormalizer');
@@ -92,6 +93,9 @@ async function handleMessage(message) {
             }
             if (payload.digital_values) {
                 await processDigitalValues(database, uid, unit, connection.type, connection.id, payload.digital_values, unix, _unit);
+            }
+            if (payload.values) {
+                await processValues(database, uid, unit, payload.values, unix, _unit);
             }
         }
 

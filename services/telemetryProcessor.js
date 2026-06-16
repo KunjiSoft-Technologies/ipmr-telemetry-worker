@@ -1113,10 +1113,63 @@ async function countElectricity(database, name, electricity_consumption, time, u
     }
 }
 
+async function processValues(database, uid, unit, values, unix, _unit) {
+    if (!values || typeof values !== 'object') return;
+
+    for (const key of Object.keys(values)) {
+        let address;
+        let buffer;
+        let value;
+        try {
+            address = Number(key.split('_')[0]);
+            buffer = key.split('_')[1];
+            value = Number(values[key]) || 0;
+        } catch (err) {
+            console.error(`unable to extract data from key ${key}: ${err}`);
+            continue;
+        }
+
+        if (!_unit.address || !_unit.address[address] || !_unit.address[address][buffer]) {
+            continue;
+        }
+
+        const target = _unit.address[address][buffer];
+        if (target === "NONE") continue;
+
+        const name = target.split('&')[0];
+        const type = target.split('&')[1];
+
+        if (type === 'production' || type === 'production_in_meter') {
+            if (value > 0) {
+                let names = [];
+                if (name.includes('-')) names = name.split('-');
+                else if (name.includes('+')) names = name.split('+');
+                else names.push(name);
+
+                for (const subName of names) {
+                    await countProduction(database, subName, value, 0, uid, unit, unix, _unit);
+                }
+            }
+        } else {
+            if (value > 0) {
+                let names = [];
+                if (name.includes('-')) names = name.split('-');
+                else if (name.includes('+')) names = name.split('+');
+                else names.push(name);
+
+                for (const subName of names) {
+                    await countElectricity(database, subName, value, 0, uid, unit, unix, _unit, type);
+                }
+            }
+        }
+    }
+}
+
 module.exports = {
     checkDuplicate,
     verifySequence,
     trackTemperature,
     processPhaseValues,
-    processDigitalValues
+    processDigitalValues,
+    processValues
 };
