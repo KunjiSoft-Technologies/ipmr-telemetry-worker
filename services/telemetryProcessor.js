@@ -69,6 +69,30 @@ async function trackTemperature(database, uid, unit, payload) {
     return null;
 }
 
+const ALLOWED_HOURLY_METRICS = {
+    // For individual phases R, S, T
+    phase: {
+        "VOLTAGE": ["min", "max", "avg"],
+        "L_L_VOLTAGE": ["min", "max", "avg"],
+        "AMPERE": ["max", "avg"],
+        "POWER": ["max", "avg"]
+    },
+    // For SUM phase
+    SUM: {
+        "VOLTAGE": ["min", "max", "avg"],
+        "L_L_VOLTAGE": ["min", "max", "avg"],
+        "FREQUENCY": ["min", "max", "avg"],
+        "POWER_FACTOR": ["max", "avg"],
+        "CURRENT_THD": ["max", "avg"],
+        "VOLTAGE_THD": ["max", "avg"],
+        "AMPERE": ["max", "avg"],
+        "APPARENT_POWER": ["max", "avg"],
+        "REACTIVE_POWER": ["max", "avg"],
+        "POWER": ["max", "avg"],
+        "NEUTRAL_AMPERE": ["max", "avg"]
+    }
+};
+
 async function processPhaseValues(database, uid, unit, type, id, phase_values, unix, _unit) {
     const today = getToday(uid, unix, _unit);
     const hour = whatHour(uid, unix, _unit);
@@ -108,28 +132,84 @@ async function processPhaseValues(database, uid, unit, type, id, phase_values, u
 
         for (const [param, pv] of Object.entries(phaseData)) {
             if (phase === "SUM" && isAccumulatorKey(param)) continue;
-            const incomingValue = pv?.now;
-            if (incomingValue === undefined || incomingValue === null) continue;
 
-            const txFn = (current) => {
-                if (current === null) {
-                    return { min: incomingValue, max: incomingValue, avg: incomingValue, avg_sum: incomingValue, avg_count: 1 };
-                }
-                const newAvgSum = (current.avg_sum ?? 0) + incomingValue;
-                const newAvgCount = (current.avg_count ?? 0) + 1;
-                return {
-                    min: Math.min(current.min ?? incomingValue, incomingValue),
-                    max: Math.max(current.max ?? incomingValue, incomingValue),
-                    avg: newAvgSum / newAvgCount,
-                    avg_sum: newAvgSum,
-                    avg_count: newAvgCount
+            const incomingMin = pv?.min !== undefined && pv?.min !== null ? Number(pv.min) : (pv?.now !== undefined ? Number(pv.now) : null);
+            const incomingMax = pv?.max !== undefined && pv?.max !== null ? Number(pv.max) : (pv?.now !== undefined ? Number(pv.now) : null);
+            const incomingAvg = pv?.avg !== undefined && pv?.avg !== null ? Number(pv.avg) : (pv?.now !== undefined ? Number(pv.now) : null);
+
+            // 1. Process Daily Report (retain everything, auto-detect stats keys)
+            const dailyStatsKeys = pv?.min !== undefined && pv?.min !== null ? ["min", "max", "avg"] : ["max", "avg"];
+            const hasDailyMin = dailyStatsKeys.includes("min") && incomingMin !== null && Number.isFinite(incomingMin);
+            const hasDailyMax = dailyStatsKeys.includes("max") && incomingMax !== null && Number.isFinite(incomingMax);
+            const hasDailyAvg = dailyStatsKeys.includes("avg") && incomingAvg !== null && Number.isFinite(incomingAvg);
+
+            if (hasDailyMin || hasDailyMax || hasDailyAvg) {
+                const txFnDaily = (current) => {
+                    const nextVal = {};
+                    if (current === null) {
+                        if (hasDailyMin) nextVal.min = incomingMin;
+                        if (hasDailyMax) nextVal.max = incomingMax;
+                        if (hasDailyAvg) {
+                            nextVal.avg = incomingAvg;
+                            nextVal.avg_sum = incomingAvg;
+                            nextVal.avg_count = 1;
+                        }
+                        return nextVal;
+                    }
+                    if (hasDailyMin) nextVal.min = Math.min(current.min ?? incomingMin, incomingMin);
+                    if (hasDailyMax) nextVal.max = Math.max(current.max ?? incomingMax, incomingMax);
+                    if (hasDailyAvg) {
+                        const newAvgSum = (current.avg_sum ?? 0) + incomingAvg;
+                        const newAvgCount = (current.avg_count ?? 0) + 1;
+                        nextVal.avg = newAvgSum / newAvgCount;
+                        nextVal.avg_sum = newAvgSum;
+                        nextVal.avg_count = newAvgCount;
+                    }
+                    return nextVal;
                 };
-            };
 
-            transactionPromises.push(
-                database.ref(`users/${uid}/reports/${type}/${id}/daily/${today}/phase_values/${phase}/${param}`).transaction(txFn),
-                database.ref(`users/${uid}/reports/${type}/${id}/new_hourly/${today}/${hour}/phase_values/${phase}/${param}`).transaction(txFn)
-            );
+                transactionPromises.push(
+                    database.ref(`users/${uid}/reports/${type}/${id}/daily/${today}/phase_values/${phase}/${param}`).transaction(txFnDaily)
+                );
+            }
+
+            // 2. Process Hourly Report (restricted keys and specific stats)
+            const allowedHourlyStats = phase === "SUM" ? ALLOWED_HOURLY_METRICS.SUM[param] : ALLOWED_HOURLY_METRICS.phase[param];
+            if (allowedHourlyStats) {
+                const hasHourlyMin = allowedHourlyStats.includes("min") && incomingMin !== null && Number.isFinite(incomingMin);
+                const hasHourlyMax = allowedHourlyStats.includes("max") && incomingMax !== null && Number.isFinite(incomingMax);
+                const hasHourlyAvg = allowedHourlyStats.includes("avg") && incomingAvg !== null && Number.isFinite(incomingAvg);
+
+                if (hasHourlyMin || hasHourlyMax || hasHourlyAvg) {
+                    const txFnHouly = (current) => {
+                        const nextVal = {};
+                        if (current === null) {
+                            if (hasHourlyMin) nextVal.min = incomingMin;
+                            if (hasHourlyMax) nextVal.max = incomingMax;
+                            if (hasHourlyAvg) {
+                                nextVal.avg = incomingAvg;
+                                nextVal.avg_sum = incomingAvg;
+                                nextVal.avg_count = 1;
+                            }
+                            return nextVal;
+                        }
+                        if (hasHourlyMin) nextVal.min = Math.min(current.min ?? incomingMin, incomingMin);
+                        if (hasHourlyMax) nextVal.max = Math.max(current.max ?? incomingMax, incomingMax);
+                        if (hasHourlyAvg) {
+                            const newAvgSum = (current.avg_sum ?? 0) + incomingAvg;
+                            const newAvgCount = (current.avg_count ?? 0) + 1;
+                            nextVal.avg = newAvgSum / newAvgCount;
+                            nextVal.avg_sum = newAvgSum;
+                            nextVal.avg_count = newAvgCount;
+                        }
+                        return nextVal;
+                    };
+
+                    transactionPromises.push(
+                        database.ref(`users/${uid}/reports/${type}/${id}/new_hourly/${today}/${hour}/phase_values/${phase}/${param}`).transaction(txFnHouly)
+                    );
+                }
+            }
         }
     }
     await Promise.all(transactionPromises);
