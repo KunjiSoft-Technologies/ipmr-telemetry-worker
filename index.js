@@ -12,6 +12,7 @@ const {
     processDigitalValues
 } = require('./services/telemetryProcessor');
 const { processAlerts } = require('./services/alertManager');
+const { normalizePayload } = require('./utils/payloadNormalizer');
 
 // Initialize Pub/Sub Client
 const pubsub = new PubSub();
@@ -43,6 +44,7 @@ async function handleMessage(message) {
     let payload = {};
     try {
         payload = JSON.parse(message.data.toString());
+        payload = normalizePayload(payload);
     } catch (err) {
         console.error('Failed to parse message payload JSON. Acknowledging and skipping.', err);
         message.ack();
