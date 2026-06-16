@@ -41,17 +41,18 @@ async function handleMessage(message) {
         return;
     }
 
-    const unix = unixStr ? Number(unixStr) : Math.floor(Date.now() / 1000);
-
     let payload = {};
     try {
-        payload = JSON.parse(message.data.toString());
+        const raw = JSON.parse(message.data.toString());
+        payload = raw.data || raw;
         payload = normalizePayload(payload);
     } catch (err) {
         console.error('Failed to parse message payload JSON. Acknowledging and skipping.', err);
         message.ack();
         return;
     }
+
+    const unix = unixStr ? Number(unixStr) : (payload.timestamp || payload.unix || Math.floor(Date.now() / 1000));
 
     let success = true;
     let uid = null;

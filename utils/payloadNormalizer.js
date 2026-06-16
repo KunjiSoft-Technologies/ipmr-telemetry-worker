@@ -18,7 +18,24 @@ const PHASE_KEYS = {
     thd_a: 'CURRENT_THD',
     thd_v: 'VOLTAGE_THD',
     thd_ll: 'L_L_VOLTAGE_THD',
-    na: 'NEUTRAL_AMPERE'
+    cthd: 'CURRENT_THD',
+    vthd: 'VOLTAGE_THD',
+    llvthd: 'L_L_VOLTAGE_THD',
+    na: 'NEUTRAL_AMPERE',
+    vah: 'SUM_VAH',
+    wh_i: 'SUM_WH_Import',
+    wh_e: 'SUM_WH_Export',
+    wh_t: 'SUM_WH_Total',
+    varh_i: 'SUM_VarH_Ind',
+    varh_c: 'SUM_VarH_Cap',
+    varh_t: 'SUM_VarH_Total',
+    vah_l: 'SUM_VAH_Long',
+    wh_i_l: 'SUM_WH_Import_Long',
+    wh_e_l: 'SUM_WH_Export_Long',
+    wh_t_l: 'SUM_WH_Total_Long',
+    varh_i_l: 'SUM_VarH_Ind_Long',
+    varh_c_l: 'SUM_VarH_Cap_Long',
+    varh_t_l: 'SUM_VarH_Total_Long'
 };
 
 const STATS_KEYS = {
