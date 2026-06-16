@@ -10,7 +10,8 @@ const {
     trackTemperature,
     processPhaseValues,
     processDigitalValues,
-    processValues
+    processValues,
+    processDirectTelemetry
 } = require('./services/telemetryProcessor');
 const { processAlerts } = require('./services/alertManager');
 const { normalizePayload } = require('./utils/payloadNormalizer');
@@ -96,6 +97,9 @@ async function handleMessage(message) {
             }
             if (payload.values) {
                 await processValues(database, uid, unit, payload.values, unix, _unit);
+            }
+            if (payload.production !== undefined || payload.kwhr !== undefined) {
+                await processDirectTelemetry(database, uid, unit, connection.type, connection.id, payload, unix, _unit);
             }
         }
 

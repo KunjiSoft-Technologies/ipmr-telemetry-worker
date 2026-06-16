@@ -1165,11 +1165,70 @@ async function processValues(database, uid, unit, values, unix, _unit) {
     }
 }
 
+async function processDirectTelemetry(database, uid, unit, connectionType, connectionId, payload, unix, _unit) {
+    const promises = [];
+    let updatedAccumulators = false;
+
+    if (!_unit.lastAccumulators) {
+        _unit.lastAccumulators = {};
+    }
+
+    if (payload.production !== undefined) {
+        const currentProd = Number(payload.production);
+        if (Number.isFinite(currentProd)) {
+            const prevProd = _unit.lastAccumulators.production !== undefined ? Number(_unit.lastAccumulators.production) : null;
+            let deltaProduction = 0;
+            if (prevProd !== null) {
+                deltaProduction = currentProd > prevProd ? (currentProd - prevProd) : 0;
+            }
+            _unit.lastAccumulators.production = currentProd;
+            updatedAccumulators = true;
+
+            if (connectionType === 'machines' && deltaProduction > 0) {
+                promises.push(
+                    countProduction(database, connectionId, deltaProduction, 0, uid, unit, unix, _unit)
+                );
+            }
+        }
+    }
+
+    if (payload.kwhr !== undefined) {
+        const currentKwhr = Number(payload.kwhr);
+        if (Number.isFinite(currentKwhr)) {
+            const prevKwhr = _unit.lastAccumulators.kwhr !== undefined ? Number(_unit.lastAccumulators.kwhr) : null;
+            let deltaKwhr = 0;
+            if (prevKwhr !== null) {
+                deltaKwhr = currentKwhr > prevKwhr ? (currentKwhr - prevKwhr) : 0;
+            }
+            _unit.lastAccumulators.kwhr = currentKwhr;
+            updatedAccumulators = true;
+
+            if (deltaKwhr > 0) {
+                promises.push(
+                    countElectricity(database, connectionId, deltaKwhr, 0, uid, unit, unix, _unit, connectionType)
+                );
+            }
+        }
+    }
+
+    if (updatedAccumulators) {
+        promises.push(
+            database.ref(`users/${uid}/units/${unit}/lastAccumulators`).set(_unit.lastAccumulators)
+        );
+    }
+
+    if (promises.length > 0) {
+        await Promise.all(promises);
+    }
+}
+
 module.exports = {
     checkDuplicate,
     verifySequence,
     trackTemperature,
     processPhaseValues,
     processDigitalValues,
-    processValues
+    processValues,
+    processDirectTelemetry
 };
+
