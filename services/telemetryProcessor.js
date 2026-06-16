@@ -1224,20 +1224,38 @@ async function processDirectTelemetry(database, uid, unit, connectionType, conne
 
 /**
  * Always called for every packet to ensure the daily/hourly report total node
- * exists even when there is no production or consumption data.
- * Passes 0 values so increment(0) creates the structure without changing totals.
+ * exists and to track ontime/offtime based on machine_status.
+ * Calculates elapsed time since the last packet using _unit.targets.
  */
 async function touchReports(database, uid, unit, connectionType, connectionId, unix, _unit) {
     const promises = [];
 
+    // Calculate time since last packet
+    if (!_unit.targets) _unit.targets = {};
+    if (!_unit.targets[connectionId]) {
+        _unit.targets[connectionId] = {
+            previousUnix: unix
+        };
+    }
+
+    const previousUnix = _unit.targets[connectionId].previousUnix || unix;
+    let time = unix - previousUnix;
+    if (time < 0 || time > 3600) time = 0; // sanity cap: ignore gaps > 1 hour or negative
+    _unit.targets[connectionId].previousUnix = unix;
+
     if (connectionType === 'machines') {
         promises.push(
-            countProduction(database, connectionId, 0, 0, uid, unit, unix, _unit)
+            countProduction(database, connectionId, 0, time, uid, unit, unix, _unit)
         );
     }
 
     promises.push(
-        countElectricity(database, connectionId, 0, 0, uid, unit, unix, _unit, connectionType)
+        countElectricity(database, connectionId, 0, time, uid, unit, unix, _unit, connectionType)
+    );
+
+    // Persist updated targets
+    promises.push(
+        database.ref(`users/${uid}/targets/${unit}/${connectionId}/previousUnix`).set(unix)
     );
 
     await Promise.all(promises);

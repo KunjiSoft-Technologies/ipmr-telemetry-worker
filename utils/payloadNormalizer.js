@@ -139,13 +139,17 @@ function normalizePayload(raw) {
             if (Array.isArray(rawLogs)) {
                 dv[signal] = rawLogs.map(entry => {
                     if (entry && typeof entry === 'object') {
+                        // Object entry: { h, l } or { high, low }
                         return {
                             high: entry.h !== undefined ? entry.h : (entry.high !== undefined ? entry.high : null),
                             low: entry.l !== undefined ? entry.l : (entry.low !== undefined ? entry.low : null)
                         };
+                    } else if (typeof entry === 'number' && Number.isFinite(entry)) {
+                        // Plain timestamp: treat as a pulse at that time
+                        return { high: entry, low: entry };
                     }
-                    return entry;
-                }).filter(entry => entry && entry.high !== null);
+                    return null;
+                }).filter(entry => entry !== null && entry.high !== null);
             } else {
                 dv[signal] = [];
             }

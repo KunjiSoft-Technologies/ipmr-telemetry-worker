@@ -102,6 +102,17 @@ function runTests() {
         console.log('Verifying digital_values...');
         assert.deepStrictEqual(normalized.digital_values.X1, [ { high: 1234567, low: 1234568 } ]);
 
+        console.log('Verifying digital_values with plain timestamps...');
+        const plainDvPayload = {
+            dv: {
+                x1: { m: 1, v: [1781633487] },
+                x2: { m: 1, v: [] }
+            }
+        };
+        const normalizedPlainDv = normalizePayload(plainDvPayload);
+        assert.deepStrictEqual(normalizedPlainDv.digital_values.x1, [ { high: 1781633487, low: 1781633487 } ]);
+        assert.deepStrictEqual(normalizedPlainDv.digital_values.x2, []);
+
         console.log('\nVerifying standard payload backward compatibility...');
         const unchanged = normalizePayload(standardPayload);
         assert.strictEqual(unchanged.packet_id, 101);
