@@ -89,6 +89,7 @@ async function lookupMacAndUnit(mac) {
             packetID: `/users/${uid}/units/${unit}/packetID`,
             packetOrder: `/users/${uid}/units/${unit}/packetOrder`,
             lastNowCounts: `/users/${uid}/units/${unit}/lastNowCounts`,
+            lastAccumulators: `/users/${uid}/units/${unit}/lastAccumulators`,
             targets: `/users/${uid}/targets/${unit}`,
             offlineElectricityTrack: `/users/${uid}/offlineElectricityTrack/${unit}`,
             connections: `/users/${uid}/connections/${unit}`,
@@ -121,6 +122,9 @@ async function lookupMacAndUnit(mac) {
         }
         if (results.lastNowCounts !== null && results.lastNowCounts !== undefined) {
             _unit.lastNowCounts = results.lastNowCounts;
+        }
+        if (results.lastAccumulators !== null && results.lastAccumulators !== undefined) {
+            _unit.lastAccumulators = results.lastAccumulators;
         }
         if (results.targets !== null && results.targets !== undefined) {
             _unit.targets = results.targets;
