@@ -83,6 +83,12 @@ async function handleMessage(message) {
         // 5. Perform packet ID sequencing check
         await verifySequence(database, uid, unit, payload, _unit);
 
+        // Update lastContact and cleanDisconnect in RTDB
+        await database.ref(`/users/${uid}/units/${unit}`).update({
+            lastContact: unix,
+            cleanDisconnect: false
+        });
+
         // 6. Process temperature tracking
         const temperature = await trackTemperature(database, uid, unit, payload);
 
