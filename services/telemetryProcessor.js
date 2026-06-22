@@ -1149,7 +1149,22 @@ async function processDigitalValues(database, uid, unit, type, id, digital_value
     const hour = whatHour(uid, unix, _unit);
     const ioTransactionPromises = [];
     const connectionInputs = _unit.connection?.inputs || {};
-    const productionSignal = typeof connectionInputs.production === "string" ? connectionInputs.production : null;
+    const normalizedInputs = {};
+    for (const [k, v] of Object.entries(connectionInputs)) {
+        if (typeof v === 'string') {
+            normalizedInputs[k.toUpperCase()] = v.toUpperCase();
+        } else if (v && typeof v === 'object') {
+            const normalizedSub = {};
+            for (const [subK, subV] of Object.entries(v)) {
+                normalizedSub[subK.toUpperCase()] = typeof subV === 'string' ? subV.toUpperCase() : subV;
+            }
+            normalizedInputs[k.toUpperCase()] = normalizedSub;
+        } else {
+            normalizedInputs[k.toUpperCase()] = v;
+        }
+    }
+
+    const productionSignal = typeof normalizedInputs.PRODUCTION === "string" ? normalizedInputs.PRODUCTION : null;
     let productionCountIncrement = 0;
 
     for (const [signal, logs] of Object.entries(digital_values || {})) {
@@ -1157,8 +1172,9 @@ async function processDigitalValues(database, uid, unit, type, id, digital_value
         const validLogs = logs.filter((entry) => toRange(entry) !== null);
 
         let countToIncrement = validLogs.length;
-        if (productionSignal && signal === productionSignal) {
-            const seriesSignal = connectionInputs?.[signal]?.series;
+        const upperSignal = signal.toUpperCase();
+        if (productionSignal && upperSignal === productionSignal) {
+            const seriesSignal = normalizedInputs?.[upperSignal]?.SERIES;
             if (typeof seriesSignal === "string" && Array.isArray(digital_values?.[seriesSignal])) {
                 countToIncrement = countOverlapEvents(validLogs, digital_values[seriesSignal]);
             }

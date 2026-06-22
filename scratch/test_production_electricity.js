@@ -101,7 +101,7 @@ async function runTests() {
         },
         connection: {
             inputs: {
-                production: 'X1'
+                production: 'x1'
             }
         },
         targets: {},
@@ -139,10 +139,9 @@ async function runTests() {
         const stats = dbMockData[dailyTotalPath];
 
         assert.ok(stats, 'Daily machine stats should exist');
-        // Daily values are incremented using admin.database.ServerValue.increment, 
-        // which our mock records directly under the transaction or callback.
-        // Let's assert the raw updates.
-        console.log('Daily stats written:', stats);
+        assert.deepStrictEqual(stats.production, { '.sv': { increment: 8 } });
+        assert.deepStrictEqual(stats.shots, { '.sv': { increment: 2 } });
+        assert.deepStrictEqual(stats.material_usage, { '.sv': { increment: 80 } });
         
         console.log('✓ Test 1 passed.');
     } catch (err) {
