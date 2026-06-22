@@ -1,5 +1,6 @@
 require('dotenv').config();
 const { PubSub } = require('@google-cloud/pubsub');
+const moment = require('moment');
 const database = require('./config/database');
 const redis = require('./config/redis');
 const { writeInfluxRecord } = require('./config/Influx');
@@ -13,6 +14,7 @@ const {
 } = require('./services/telemetryProcessor');
 const { processAlerts } = require('./services/alertManager');
 const { normalizePayload } = require('./utils/payloadNormalizer');
+const { getToday } = require('./utils/timeHelpers');
 
 // Initialize Pub/Sub Client
 const pubsub = new PubSub();
@@ -39,12 +41,26 @@ async function handleMessage(message) {
         return;
     }
 
-    const unix = unixStr ? Number(unixStr) : Math.floor(Date.now() / 1000);
-
     let payload = {};
+    let isRecordsAction = false;
+    let remaining = null;
+    let unix = unixStr ? Number(unixStr) : Math.floor(Date.now() / 1000);
+
     try {
-        payload = JSON.parse(message.data.toString());
-        payload = normalizePayload(payload);
+        const rawPayload = JSON.parse(message.data.toString());
+        if (rawPayload.action === 'RECORDS' && rawPayload.data) {
+            isRecordsAction = true;
+            remaining = rawPayload.remaining !== undefined ? Number(rawPayload.remaining) : null;
+            payload = normalizePayload(rawPayload.data);
+        } else {
+            payload = normalizePayload(rawPayload);
+        }
+
+        // If the telemetry payload has an internal timestamp, use it
+        const packetUnix = payload.unix || payload.timestamp;
+        if (packetUnix) {
+            unix = Number(packetUnix);
+        }
     } catch (err) {
         console.error('Failed to parse message payload JSON. Acknowledging and skipping.', err);
         message.ack();
@@ -83,11 +99,67 @@ async function handleMessage(message) {
         // 5. Perform packet ID sequencing check
         await verifySequence(database, uid, unit, payload, _unit);
 
-        // Update lastContact and cleanDisconnect in RTDB
-        await database.ref(`/users/${uid}/units/${unit}`).update({
+        // Update lastContact, cleanDisconnect, and handle remaining/offline-complete logic in RTDB
+        const updateFields = {
             lastContact: unix,
             cleanDisconnect: false
-        });
+        };
+
+        if (isRecordsAction && remaining !== null) {
+            if (remaining > 0) {
+                // Mark in-memory uploading state
+                if (!_unit.uploadingPrev) {
+                    _unit.uploadingPrev = { status: true, time: unix };
+                } else {
+                    _unit.uploadingPrev.status = true;
+                    if (_unit.uploadingPrev.time === null) {
+                        _unit.uploadingPrev.time = unix;
+                    }
+                }
+
+                updateFields.realtime = false;
+                updateFields.uploadRemaining = remaining;
+                updateFields.uploadedTil = moment.unix(unix).format("YYYY-MM-DD HH:mm:ss");
+            } else if (remaining === 0) {
+                // Offline upload complete
+                _unit.uploadingPrev = { status: false, time: null };
+
+                updateFields.realtime = true;
+                updateFields.uploadRemaining = null;
+                updateFields.uploadedTil = null;
+
+                // Trigger daily report completion logic for past days
+                try {
+                    const today = getToday(uid, unix, _unit);
+                    let prevDay = moment(today).subtract(1, 'days').format('YYYY-MM-DD');
+                    const snap = await database.ref(`users/${uid}/reports/factory/daily/${prevDay}/completed/${unit}`).once('value');
+                    const data = snap.val();
+                    if (!data) {
+                        await database.ref(`users/${uid}/reports/factory/daily/${prevDay}/completed/${unit}`).set(true);
+                        for (const machine of Object.keys(_unit.machines || {})) {
+                            await database.ref(`users/${uid}/reports/machines/${machine}/daily/${prevDay}/completed`).set(true);
+                        }
+                        let skip = false;
+                        while (!skip) {
+                            prevDay = moment(prevDay).subtract(1, 'days').format('YYYY-MM-DD');
+                            const snap = await database.ref(`users/${uid}/reports/factory/daily/${prevDay}`).once('value');
+                            if (snap.exists() && !snap.child(`completed/${unit}`).exists() && !snap.child(`allDone`).exists()) {
+                                await database.ref(`users/${uid}/reports/factory/daily/${prevDay}/completed/${unit}`).set(true);
+                                for (const machine of Object.keys(_unit.machines || {})) {
+                                    await database.ref(`users/${uid}/reports/machines/${machine}/daily/${prevDay}/completed`).set(true);
+                                }
+                            } else {
+                                skip = true;
+                            }
+                        }
+                    }
+                } catch (completionErr) {
+                    console.error('Error completing past daily reports:', completionErr);
+                }
+            }
+        }
+
+        await database.ref(`/users/${uid}/units/${unit}`).update(updateFields);
 
         // 6. Process temperature tracking
         const temperature = await trackTemperature(database, uid, unit, payload);
@@ -167,13 +239,15 @@ async function handleMessage(message) {
     }
 }
 
-// Subscribe to messages
-subscription.on('message', handleMessage);
+// Subscribe to messages if not running in test mode
+if (process.env.NODE_ENV !== 'test') {
+    subscription.on('message', handleMessage);
 
-// Handle errors
-subscription.on('error', (error) => {
-    console.error(`Pub/Sub Subscription Error:`, error);
-});
+    // Handle errors
+    subscription.on('error', (error) => {
+        console.error(`Pub/Sub Subscription Error:`, error);
+    });
+}
 
 process.on('SIGTERM', () => {
     console.log('SIGTERM signal received. Closing subscription listener...');
@@ -182,3 +256,5 @@ process.on('SIGTERM', () => {
         process.exit(0);
     });
 });
+
+module.exports = { handleMessage };
