@@ -8,6 +8,19 @@ const { toRange, countOverlapEvents } = require('../utils/overlapHelpers');
  * @returns {Promise<boolean>} - True if it is a duplicate and we should abort.
  */
 async function checkDuplicate(database, uid, unit, unix, _unit, redis, saveUnitToCache) {
+    if (redis) {
+        try {
+            const lockKey = `packet_lock:${uid}:${unit}:${unix}`;
+            const acquired = await redis.set(lockKey, '1', 'NX', 'EX', 30);
+            if (!acquired) {
+                console.log(`Lock already exists for packet ${lockKey}. Skipping as duplicate.`);
+                return true;
+            }
+        } catch (err) {
+            console.error('Error checking redis concurrent lock:', err);
+        }
+    }
+
     const lastUnix = _unit.packetID?.val || 0;
     if (unix <= lastUnix) {
         // Increment /users/${uid}/units/${unit}/repeatedID by 1 in RTDB
@@ -992,9 +1005,120 @@ async function countElectricity(database, uid, unit, type, name, value, time, un
     return _unit;
 }
 
+async function ensureHourlyReportKey(database, uid, type, id, today, unix, _unit) {
+    if (!_unit.hourlyReportData) _unit.hourlyReportData = {};
+    
+    // If it's already in memory cache, return it
+    if (_unit.hourlyReportData[id] !== undefined && _unit.hourlyReportData[id] !== null) {
+        return _unit.hourlyReportData[id].key;
+    }
+    
+    // Otherwise, try to fetch the last key from RTDB
+    const snap = await database.ref(`users/${uid}/reports/${type}/${id}/hourly/${today}`).limitToLast(1).once("value");
+    const hourlyData = snap.val();
+    if (hourlyData !== null) {
+        const key = Object.keys(hourlyData)[0];
+        const values = Object.values(hourlyData)[0];
+        _unit.hourlyReportData[id] = { key: Number(key), values };
+        return Number(key);
+    }
+    
+    // If not found in RTDB, we need to create/initialize the first segment (key: 0)
+    const key = 0;
+    const datetime = moment.unix(unix);
+    const sec = (datetime.hours() * 3600) + datetime.minutes() * 60 + datetime.seconds();
+    const hoursx = sec <= (Number(_unit.info.shift_a_start || 0) + 59) ? 24 + datetime.hours() : datetime.hours();
+    const seconds = (hoursx * 3600) + datetime.minutes() * 60 + datetime.seconds();
+    
+    const shiftStartMinutes = (Number(_unit.info.shift_a_start || 0) % 3600) / 60;
+    const shiftStartHours = Math.floor(Number(_unit.info.shift_a_start || 0) / 3600);
+    const nextTime = ((((hoursx - 24 === shiftStartHours || datetime.minutes() < shiftStartMinutes) ? hoursx : hoursx + 1)) * 3600 + shiftStartMinutes * 60) + 59;
+    
+    let status = false;
+    let operator = '';
+    let mold_name = 'NA';
+    let details = {};
+
+    if (type === 'machines') {
+        const machineObj = _unit.machines?.[id] || {};
+        status = machineObj.machine_status ?? false;
+        
+        let targetHoursx = hoursx;
+        let targetSeconds = seconds;
+        let targetShifts = Number(_unit.info.shifts || 1);
+        if (targetShifts === 2) {
+            if (Number(_unit.info.shift_a_start || 0) <= targetSeconds && targetSeconds <= Number(_unit.info.shift_b_start || 0)) {
+                operator = machineObj.operator_a || '';
+            } else {
+                operator = machineObj.operator_b || '';
+            }
+        } else if (targetShifts === 3) {
+            if (Number(_unit.info.shift_a_start || 0) <= targetSeconds && targetSeconds <= Number(_unit.info.shift_b_start || 0)) {
+                operator = machineObj.operator_a || '';
+            } else if (Number(_unit.info.shift_b_start || 0) <= targetSeconds && targetSeconds <= Number(_unit.info.shift_c_start || 0)) {
+                operator = machineObj.operator_b || '';
+            } else {
+                operator = machineObj.operator_c || '';
+            }
+        } else {
+            operator = machineObj.operator_a || '';
+        }
+        
+        if (machineObj.installedMold === undefined) {
+            details.cavities = machineObj.cavities || 1;
+            details.product = machineObj.product || 'N/A';
+            details.isUniversal = !!machineObj.isUniversal;
+            details.product_color = machineObj.product_color || 'N/A';
+            details.materials = [{
+                name: machineObj.material || 'copp',
+                weight: machineObj.product_weight || 100
+            }];
+            details.material = machineObj.material || 'copp';
+            details.product_weight = machineObj.product_weight || 100;
+        } else {
+            mold_name = machineObj.installedMold.name;
+            details.cavities = machineObj.installedMold.cavities;
+            details.isUniversal = !!machineObj.installedMold.isUniversal;
+            details.product = machineObj.installedMold.productName;
+            details.product_color = machineObj.installedMold.productColor;
+            details.materials = machineObj.installedMold.materials;
+            details.material = machineObj.installedMold.materials[0]?.name || "";
+            details.product_weight = machineObj.installedMold.materials[0]?.weight || 0;
+        }
+    } else {
+        const equipmentObj = _unit.equipments?.[id] || {};
+        status = equipmentObj.status ?? false;
+    }
+
+    const initialValues = {
+        from: seconds,
+        time: nextTime,
+        status,
+        operator,
+        mold_name,
+        ...details,
+        production: 0,
+        shots: 0,
+        production_meters: 0,
+        material_usage: 0,
+        electricity_usage: 0,
+        ontime: 0,
+        offtime: 0
+    };
+
+    _unit.hourlyReportData[id] = {
+        key,
+        values: initialValues
+    };
+
+    await database.ref(`users/${uid}/reports/${type}/${id}/hourly/${today}/${key}`).set(initialValues);
+    return key;
+}
+
 async function processPhaseValues(database, uid, unit, type, id, phase_values, unix, _unit) {
     const today = getToday(uid, unix, _unit);
     const hour = whatHour(uid, unix, _unit);
+    const hourlyReportKey = await ensureHourlyReportKey(database, uid, type, id, today, unix, _unit);
     const phases = ["R", "S", "T", "SUM"];
     const transactionPromises = [];
 
@@ -1016,11 +1140,14 @@ async function processPhaseValues(database, uid, unit, type, id, phase_values, u
                 const timeDiff = _unit.previousUnix ? (unix - _unit.previousUnix) : 0;
                 const safeTimeDiff = (timeDiff < 0 || timeDiff > 3600) ? 0 : timeDiff;
 
+                const increments = {};
+                const txPromises = [];
+
                 for (const [param, rawIncomingValue] of Object.entries(accumulatorPayload)) {
                     const incomingValue = Number(rawIncomingValue);
                     if (!Number.isFinite(incomingValue)) continue;
 
-                    transactionPromises.push((async () => {
+                    txPromises.push((async () => {
                         let incrementBy = 0;
                         const result = await database.ref(`users/${uid}/reports/${type}/${id}/accumulators/${param}`).transaction((current) => {
                             const currentValue = Number(current);
@@ -1029,10 +1156,24 @@ async function processPhaseValues(database, uid, unit, type, id, phase_values, u
                             return dbValue + incrementBy;
                         });
 
-                        if (result.committed && incrementBy > 0 && (param === 'SUM_WH_Import' || param === 'SUM_WH_Total')) {
-                            await countElectricity(database, uid, unit, type, id, incrementBy, safeTimeDiff, unix, _unit);
+                        if (result.committed) {
+                            increments[param] = incrementBy;
                         }
                     })());
+                }
+
+                await Promise.all(txPromises);
+
+                // Prioritize SUM_WH_Total, fallback to SUM_WH_Import for countElectricity to avoid double counting
+                let electricityIncrement = 0;
+                if (increments['SUM_WH_Total'] > 0) {
+                    electricityIncrement = increments['SUM_WH_Total'];
+                } else if (increments['SUM_WH_Import'] > 0) {
+                    electricityIncrement = increments['SUM_WH_Import'];
+                }
+
+                if (electricityIncrement > 0) {
+                    await countElectricity(database, uid, unit, type, id, electricityIncrement, safeTimeDiff, unix, _unit);
                 }
             }
         }
@@ -1133,11 +1274,9 @@ async function processPhaseValues(database, uid, unit, type, id, phase_values, u
                         }
                         return nextVal;
                     };
-
                     transactionPromises.push(
-                        database.ref(`users/${uid}/reports/${type}/${id}/new_hourly/${today}/${hour}/phase_values/${phase}/${param}`).transaction(txFnHouly)
-                    );
-                }
+                        database.ref(`users/${uid}/reports/${type}/${id}/hourly/${today}/${hourlyReportKey}/phase_values/${phase}/${param}`).transaction(txFnHouly)
+                    );                }
             }
         }
     }
@@ -1147,6 +1286,7 @@ async function processPhaseValues(database, uid, unit, type, id, phase_values, u
 async function processDigitalValues(database, uid, unit, type, id, digital_values, unix, _unit, inputs) {
     const today = getToday(uid, unix, _unit);
     const hour = whatHour(uid, unix, _unit);
+    const hourlyReportKey = await ensureHourlyReportKey(database, uid, type, id, today, unix, _unit);
     const ioTransactionPromises = [];
     
     // Normalize inputs keys and values to uppercase for case-insensitive matching
@@ -1191,13 +1331,13 @@ async function processDigitalValues(database, uid, unit, type, id, digital_value
 
         ioTransactionPromises.push(
             database.ref(`users/${uid}/reports/${type}/${id}/daily/${today}/digital_values/${signal}`).transaction(txFn),
-            database.ref(`users/${uid}/reports/${type}/${id}/new_hourly/${today}/${hour}/digital_values/${signal}`).transaction(txFn)
+            database.ref(`users/${uid}/reports/${type}/${id}/hourly/${today}/${hourlyReportKey}/digital_values/${signal}`).transaction(txFn)
         );
     }
 
     ioTransactionPromises.push(
         database.ref(`users/${uid}/reports/${type}/${id}/daily/${today}/digital_values/total`).set(admin.database.ServerValue.increment(productionCountIncrement)),
-        database.ref(`users/${uid}/reports/${type}/${id}/new_hourly/${today}/${hour}/digital_values/total`).set(admin.database.ServerValue.increment(productionCountIncrement))
+        database.ref(`users/${uid}/reports/${type}/${id}/hourly/${today}/${hourlyReportKey}/digital_values/total`).set(admin.database.ServerValue.increment(productionCountIncrement))
     );
 
     await Promise.all(ioTransactionPromises);
