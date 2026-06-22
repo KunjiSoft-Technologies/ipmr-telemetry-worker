@@ -9,10 +9,7 @@ const {
     verifySequence,
     trackTemperature,
     processPhaseValues,
-    processDigitalValues,
-    processValues,
-    processDirectTelemetry,
-    touchReports
+    processDigitalValues
 } = require('./services/telemetryProcessor');
 const { processAlerts } = require('./services/alertManager');
 const { normalizePayload } = require('./utils/payloadNormalizer');
@@ -42,18 +39,17 @@ async function handleMessage(message) {
         return;
     }
 
+    const unix = unixStr ? Number(unixStr) : Math.floor(Date.now() / 1000);
+
     let payload = {};
     try {
-        const raw = JSON.parse(message.data.toString());
-        payload = raw.data || raw;
+        payload = JSON.parse(message.data.toString());
         payload = normalizePayload(payload);
     } catch (err) {
         console.error('Failed to parse message payload JSON. Acknowledging and skipping.', err);
         message.ack();
         return;
     }
-
-    const unix = unixStr ? Number(unixStr) : (payload.timestamp || payload.unix || Math.floor(Date.now() / 1000));
 
     let success = true;
     let uid = null;
@@ -94,18 +90,13 @@ async function handleMessage(message) {
             if (payload.phase_values) {
                 await processPhaseValues(database, uid, unit, connection.type, connection.id, payload.phase_values, unix, _unit);
             }
-            if (payload.digital_values) {
-                await processDigitalValues(database, uid, unit, connection.type, connection.id, payload.digital_values, unix, _unit);
+            if (connection.type === 'machines' || payload.digital_values) {
+                await processDigitalValues(database, uid, unit, connection.type, connection.id, payload.digital_values || {}, unix, _unit);
             }
-            if (payload.values) {
-                await processValues(database, uid, unit, payload.values, unix, _unit);
+            // Save targets back to RTDB
+            if (_unit.targets) {
+                await database.ref(`/users/${uid}/targets/${unit}`).set(_unit.targets);
             }
-            if (payload.production !== undefined || payload.kwhr !== undefined) {
-                await processDirectTelemetry(database, uid, unit, connection.type, connection.id, payload, unix, _unit);
-            }
-
-            // Always touch reports so the total node exists even with all-zero data
-            await touchReports(database, uid, unit, connection.type, connection.id, unix, _unit);
         }
 
         // 9. Evaluate alerts

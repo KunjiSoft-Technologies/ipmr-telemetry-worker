@@ -17,14 +17,10 @@ const minifiedPayload = {
             llv: { n: 375, x: 390, g: 382, w: 384 },
             f: { n: 49.8, x: 50.2, g: 50.0, w: 50.1 },
             pf: { x: 1.0, g: 0.95, w: 0.97 },
-            cthd: { x: 3.5, g: 2.1, w: 2.8 },
-            vthd: { x: 1.8, g: 1.2, w: 1.5 },
-            llvthd: { x: 1.0, g: 0.8, w: 0.9 },
+            thd_a: { x: 3.5, g: 2.1, w: 2.8 },
+            thd_v: { x: 1.8, g: 1.2, w: 1.5 },
             a: { x: 32, g: 25.5, w: 28.2 },
-            na: { x: 2.5, g: 1.8, w: 2.0 },
-            wh_t: 12345.67,
-            wh_i: 12300.12,
-            wh_e: 45.55
+            na: { x: 2.5, g: 1.8, w: 2.0 }
         }
     },
     av: {
@@ -35,7 +31,7 @@ const minifiedPayload = {
         bat_state: 'no_battery'
     },
     dv: {
-        X1: { mode: 1, values: [ { h: 1234567, l: 1234568 } ] }
+        X1: { mode: 1, values: [] }
     }
 };
 
@@ -80,15 +76,9 @@ function runTests() {
         console.log('Verifying SUM parameters...');
         assert.ok(normalized.phase_values.SUM.L_L_VOLTAGE, 'L_L_VOLTAGE should exist');
         assert.ok(normalized.phase_values.SUM.FREQUENCY, 'FREQUENCY should exist');
-        assert.strictEqual(normalized.phase_values.SUM.CURRENT_THD.max, 3.5);
-        assert.strictEqual(normalized.phase_values.SUM.VOLTAGE_THD.max, 1.8);
-        assert.strictEqual(normalized.phase_values.SUM.L_L_VOLTAGE_THD.max, 1.0);
+        assert.ok(normalized.phase_values.SUM.CURRENT_THD, 'CURRENT_THD (thd_a) should exist');
+        assert.ok(normalized.phase_values.SUM.VOLTAGE_THD, 'VOLTAGE_THD (thd_v) should exist');
         assert.ok(normalized.phase_values.SUM.NEUTRAL_AMPERE, 'NEUTRAL_AMPERE should exist');
-        
-        console.log('Verifying SUM accumulator parameters...');
-        assert.strictEqual(normalized.phase_values.SUM.SUM_WH_Total, 12345.67);
-        assert.strictEqual(normalized.phase_values.SUM.SUM_WH_Import, 12300.12);
-        assert.strictEqual(normalized.phase_values.SUM.SUM_WH_Export, 45.55);
 
         console.log('Verifying analog_values expansion...');
         const temp = normalized.analog_values.temperature;
@@ -100,18 +90,7 @@ function runTests() {
         assert.strictEqual(normalized.analog_values.supply_voltage.max, 17.7);
 
         console.log('Verifying digital_values...');
-        assert.deepStrictEqual(normalized.digital_values.X1, [ { high: 1234567, low: 1234568 } ]);
-
-        console.log('Verifying digital_values with plain timestamps...');
-        const plainDvPayload = {
-            dv: {
-                x1: { m: 1, v: [1781633487] },
-                x2: { m: 1, v: [] }
-            }
-        };
-        const normalizedPlainDv = normalizePayload(plainDvPayload);
-        assert.deepStrictEqual(normalizedPlainDv.digital_values.x1, [ { high: 1781633487, low: 1781633487 } ]);
-        assert.deepStrictEqual(normalizedPlainDv.digital_values.x2, []);
+        assert.deepStrictEqual(normalized.digital_values.X1, { mode: 1, values: [] });
 
         console.log('\nVerifying standard payload backward compatibility...');
         const unchanged = normalizePayload(standardPayload);

@@ -18,24 +18,7 @@ const PHASE_KEYS = {
     thd_a: 'CURRENT_THD',
     thd_v: 'VOLTAGE_THD',
     thd_ll: 'L_L_VOLTAGE_THD',
-    cthd: 'CURRENT_THD',
-    vthd: 'VOLTAGE_THD',
-    llvthd: 'L_L_VOLTAGE_THD',
-    na: 'NEUTRAL_AMPERE',
-    vah: 'SUM_VAH',
-    wh_i: 'SUM_WH_Import',
-    wh_e: 'SUM_WH_Export',
-    wh_t: 'SUM_WH_Total',
-    varh_i: 'SUM_VarH_Ind',
-    varh_c: 'SUM_VarH_Cap',
-    varh_t: 'SUM_VarH_Total',
-    vah_l: 'SUM_VAH_Long',
-    wh_i_l: 'SUM_WH_Import_Long',
-    wh_e_l: 'SUM_WH_Export_Long',
-    wh_t_l: 'SUM_WH_Total_Long',
-    varh_i_l: 'SUM_VarH_Ind_Long',
-    varh_c_l: 'SUM_VarH_Cap_Long',
-    varh_t_l: 'SUM_VarH_Total_Long'
+    na: 'NEUTRAL_AMPERE'
 };
 
 const STATS_KEYS = {
@@ -123,38 +106,6 @@ function normalizePayload(raw) {
             }
         }
         normalized.analog_values = av;
-    }
-
-    // Normalize digital_values
-    if (normalized.digital_values && typeof normalized.digital_values === 'object') {
-        const dv = {};
-        for (const [signal, signalData] of Object.entries(normalized.digital_values)) {
-            let rawLogs = [];
-            if (Array.isArray(signalData)) {
-                rawLogs = signalData;
-            } else if (signalData && typeof signalData === 'object') {
-                rawLogs = signalData.v || signalData.values || [];
-            }
-
-            if (Array.isArray(rawLogs)) {
-                dv[signal] = rawLogs.map(entry => {
-                    if (entry && typeof entry === 'object') {
-                        // Object entry: { h, l } or { high, low }
-                        return {
-                            high: entry.h !== undefined ? entry.h : (entry.high !== undefined ? entry.high : null),
-                            low: entry.l !== undefined ? entry.l : (entry.low !== undefined ? entry.low : null)
-                        };
-                    } else if (typeof entry === 'number' && Number.isFinite(entry)) {
-                        // Plain timestamp: treat as a pulse at that time
-                        return { high: entry, low: entry };
-                    }
-                    return null;
-                }).filter(entry => entry !== null && entry.high !== null);
-            } else {
-                dv[signal] = [];
-            }
-        }
-        normalized.digital_values = dv;
     }
 
     return normalized;
