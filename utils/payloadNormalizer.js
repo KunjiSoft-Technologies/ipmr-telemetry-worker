@@ -89,6 +89,39 @@ function normalizePayload(raw) {
         normalized.phase_values = pv;
     }
 
+    // Normalize digital_values
+    if (normalized.digital_values && typeof normalized.digital_values === 'object') {
+        const dv = {};
+        for (const [rawKey, val] of Object.entries(normalized.digital_values)) {
+            const standardKey = rawKey.toUpperCase();
+            if (Array.isArray(val)) {
+                // Already in standard format (backward compatibility)
+                dv[standardKey] = val;
+            } else if (val && typeof val === 'object' && val.v !== undefined) {
+                // Minified format: { m: Mode, v: [Timestamps] }
+                const logs = [];
+                const arr = Array.isArray(val.v) ? val.v : [];
+                if (val.m === 1) {
+                    // Mode 1: High/low pairs
+                    for (let i = 0; i < arr.length; i += 2) {
+                        const high = arr[i];
+                        const low = (i + 1 < arr.length) ? arr[i + 1] : high;
+                        logs.push({ high, low });
+                    }
+                } else {
+                    // Other modes: single timestamps
+                    for (const ts of arr) {
+                        logs.push({ high: ts, low: ts });
+                    }
+                }
+                dv[standardKey] = logs;
+            } else {
+                dv[standardKey] = val;
+            }
+        }
+        normalized.digital_values = dv;
+    }
+
     // Normalize analog_values
     if (normalized.analog_values && typeof normalized.analog_values === 'object') {
         const av = {};
