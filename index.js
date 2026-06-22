@@ -69,6 +69,7 @@ async function handleMessage(message) {
         uid = lookupResult.uid;
         unit = lookupResult.unit;
         connection = lookupResult.connection;
+        const inputs = lookupResult.inputs;
         _unit = lookupResult._unit;
 
         // 4. Perform duplicate packet checking
@@ -91,7 +92,7 @@ async function handleMessage(message) {
                 await processPhaseValues(database, uid, unit, connection.type, connection.id, payload.phase_values, unix, _unit);
             }
             if (connection.type === 'machines' || payload.digital_values) {
-                await processDigitalValues(database, uid, unit, connection.type, connection.id, payload.digital_values || {}, unix, _unit);
+                await processDigitalValues(database, uid, unit, connection.type, connection.id, payload.digital_values || {}, unix, _unit, inputs);
             }
             // Save targets back to RTDB
             if (_unit.targets) {

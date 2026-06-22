@@ -1144,27 +1144,23 @@ async function processPhaseValues(database, uid, unit, type, id, phase_values, u
     await Promise.all(transactionPromises);
 }
 
-async function processDigitalValues(database, uid, unit, type, id, digital_values, unix, _unit) {
+async function processDigitalValues(database, uid, unit, type, id, digital_values, unix, _unit, inputs) {
     const today = getToday(uid, unix, _unit);
     const hour = whatHour(uid, unix, _unit);
     const ioTransactionPromises = [];
-    const connectionInputs = _unit.connection?.inputs || {};
+    
+    // Normalize inputs keys and values to uppercase for case-insensitive matching
     const normalizedInputs = {};
-    for (const [k, v] of Object.entries(connectionInputs)) {
-        if (typeof v === 'string') {
-            normalizedInputs[k.toUpperCase()] = v.toUpperCase();
-        } else if (v && typeof v === 'object') {
-            const normalizedSub = {};
-            for (const [subK, subV] of Object.entries(v)) {
-                normalizedSub[subK.toUpperCase()] = typeof subV === 'string' ? subV.toUpperCase() : subV;
+    if (inputs && typeof inputs === 'object') {
+        for (const [k, v] of Object.entries(inputs)) {
+            if (typeof v === 'string') {
+                normalizedInputs[k.toUpperCase()] = v.toUpperCase();
             }
-            normalizedInputs[k.toUpperCase()] = normalizedSub;
-        } else {
-            normalizedInputs[k.toUpperCase()] = v;
         }
     }
 
-    const productionSignal = typeof normalizedInputs.PRODUCTION === "string" ? normalizedInputs.PRODUCTION : null;
+    // Find the signal mapped to 'PRODUCTION' (e.g. { "X1": "production" } -> productionSignal = "X1")
+    const productionSignal = Object.keys(normalizedInputs).find(key => normalizedInputs[key] === 'PRODUCTION');
     let productionCountIncrement = 0;
 
     for (const [signal, logs] of Object.entries(digital_values || {})) {
@@ -1174,10 +1170,6 @@ async function processDigitalValues(database, uid, unit, type, id, digital_value
         let countToIncrement = validLogs.length;
         const upperSignal = signal.toUpperCase();
         if (productionSignal && upperSignal === productionSignal) {
-            const seriesSignal = normalizedInputs?.[upperSignal]?.SERIES;
-            if (typeof seriesSignal === "string" && Array.isArray(digital_values?.[seriesSignal])) {
-                countToIncrement = countOverlapEvents(validLogs, digital_values[seriesSignal]);
-            }
             productionCountIncrement = countToIncrement;
         }
 

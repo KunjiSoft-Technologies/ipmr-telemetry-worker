@@ -99,11 +99,7 @@ async function runTests() {
                 status: true
             }
         },
-        connection: {
-            inputs: {
-                production: 'x1'
-            }
-        },
+        connection: {},
         targets: {},
         hourlyReportData: {}
     };
@@ -130,7 +126,8 @@ async function runTests() {
         };
         mockUnit.previousUnix = unixTime - 30;
 
-        await processDigitalValues(mockDb, uid, unit, 'machines', 'mach001', digitalValues, unixTime, mockUnit);
+        const mockInputs = { 'x1': 'production' };
+        await processDigitalValues(mockDb, uid, unit, 'machines', 'mach001', digitalValues, unixTime, mockUnit, mockInputs);
 
         // Verification:
         // Shots = 2, Cavities = 4 -> Production = 8
@@ -204,7 +201,8 @@ async function runTests() {
             X1: []
         };
 
-        await processDigitalValues(mockDb, uid, unit, 'machines', 'mach001', digitalValues, unixTime, mockUnit);
+        const mockInputs = { 'x1': 'production' };
+        await processDigitalValues(mockDb, uid, unit, 'machines', 'mach001', digitalValues, unixTime, mockUnit, mockInputs);
 
         // Target timer should become 240 + 60 = 300s (5 mins)
         // Since mach001 idle_time_set is 5 mins, it should transition to OFF
