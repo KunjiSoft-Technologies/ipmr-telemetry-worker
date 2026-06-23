@@ -31,6 +31,7 @@ const subscription = pubsub.subscription(subscriptionName, {
  * Message handler for incoming Pub/Sub telemetry packets.
  */
 async function handleMessage(message) {
+    console.log(`[Pub/Sub] Raw message received. Attributes:`, message.attributes, `Body:`, message.data.toString());
     const attributes = message.attributes || {};
     const mac = attributes.machine_id;
     const unixStr = attributes.timestamp;
@@ -48,7 +49,6 @@ async function handleMessage(message) {
 
     try {
         const rawPayload = JSON.parse(message.data.toString());
-        console.log(`[Pub/Sub] Raw payload: ${message.data.toString().substring(0, 500)}`);
         console.log(`[Pub/Sub] Incoming message body parsed. action: ${rawPayload.action}, remaining: ${rawPayload.remaining} (type: ${typeof rawPayload.remaining})`);
         if (rawPayload.action === 'RECORDS' && rawPayload.data) {
             isRecordsAction = true;
