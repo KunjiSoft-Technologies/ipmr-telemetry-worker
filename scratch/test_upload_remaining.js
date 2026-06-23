@@ -41,7 +41,10 @@ const databaseMock = {
     })
 };
 
-const redisMock = {};
+const redisMock = {
+    set: async (key, val, nx, ex, ttl) => 'OK',
+    del: async (key) => 1
+};
 
 const influxMock = {
     writeInfluxRecord: async () => {}

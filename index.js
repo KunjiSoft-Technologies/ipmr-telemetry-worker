@@ -73,6 +73,8 @@ async function handleMessage(message) {
     let unit = null;
     let connection = null;
     let _unit = null;
+    let unitLockAcquired = false;
+    const unitLockKey = `unit_lock:${mac}`;
 
     try {
         // 3. Check and load/initialize the _unit object
@@ -88,6 +90,15 @@ async function handleMessage(message) {
         connection = lookupResult.connection;
         const inputs = lookupResult.inputs;
         _unit = lookupResult._unit;
+
+        // 3.1 Acquire unit processing lock to prevent concurrent processing for the same MAC
+        const acquired = await redis.set(unitLockKey, 'in_use', 'NX', 'EX', 15);
+        if (!acquired) {
+            console.log(`[Lock Conflict] MAC ${mac} is currently locked by another process. Nacking message for redelivery.`);
+            message.nack();
+            return;
+        }
+        unitLockAcquired = true;
 
         // 4. Perform duplicate packet checking
         const isDuplicate = await checkDuplicate(database, uid, unit, unix, _unit, redis, saveUnitToCache);
@@ -237,6 +248,14 @@ async function handleMessage(message) {
 
         // Nack to schedule redelivery
         message.nack();
+    } finally {
+        if (unitLockAcquired) {
+            try {
+                await redis.del(unitLockKey);
+            } catch (delErr) {
+                console.error(`Failed to release unit lock for key ${unitLockKey}:`, delErr);
+            }
+        }
     }
 }
 
