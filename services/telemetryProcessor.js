@@ -625,8 +625,8 @@ async function countElectricity(database, uid, unit, type, name, value, time, un
         if (!equipmentObj) return _unit;
         const division = Number(equipmentObj.division || 1);
         
-        // Per user feedback, SUM_WH_Total differences require no division or scaling
-        const electricity_consumption = value;
+        // Convert Watthour (Wh) from packet to Kilowatthour (kWh) for DB storage
+        const electricity_consumption = value / 1000;
         
         const time_in_h = time > 0 ? time / 3600 : 0;
         const realtime_kw_mn = time_in_h > 0 ? electricity_consumption / time_in_h : 0;
@@ -745,8 +745,8 @@ async function countElectricity(database, uid, unit, type, name, value, time, un
         const isMultiComponent = !!machineObj.multi_component;
         const division = Number(machineObj.division || 1);
         
-        // Per user feedback, SUM_WH_Total differences require no division or scaling
-        const electricity_consumption = value;
+        // Convert Watthour (Wh) from packet to Kilowatthour (kWh) for DB storage
+        const electricity_consumption = value / 1000;
         
         const time_in_h = time > 0 ? time / 3600 : 0;
         const realtime_kw_mn = time_in_h > 0 ? electricity_consumption / time_in_h : 0;
