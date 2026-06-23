@@ -20,7 +20,10 @@ const minifiedPayload = {
             thd_a: { x: 3.5, g: 2.1, w: 2.8 },
             thd_v: { x: 1.8, g: 1.2, w: 1.5 },
             a: { x: 32, g: 25.5, w: 28.2 },
-            na: { x: 2.5, g: 1.8, w: 2.0 }
+            na: { x: 2.5, g: 1.8, w: 2.0 },
+            wh_t: 1250,
+            wh_i: 1000,
+            vah_l: 1500
         }
     },
     av: {
@@ -79,6 +82,9 @@ function runTests() {
         assert.ok(normalized.phase_values.SUM.CURRENT_THD, 'CURRENT_THD (thd_a) should exist');
         assert.ok(normalized.phase_values.SUM.VOLTAGE_THD, 'VOLTAGE_THD (thd_v) should exist');
         assert.ok(normalized.phase_values.SUM.NEUTRAL_AMPERE, 'NEUTRAL_AMPERE should exist');
+        assert.strictEqual(normalized.phase_values.SUM.SUM_WH_Total, 1250);
+        assert.strictEqual(normalized.phase_values.SUM.SUM_WH_Import, 1000);
+        assert.strictEqual(normalized.phase_values.SUM.SUM_VAH_Long, 1500);
 
         console.log('Verifying analog_values expansion...');
         const temp = normalized.analog_values.temperature;
