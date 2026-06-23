@@ -48,6 +48,7 @@ async function handleMessage(message) {
 
     try {
         const rawPayload = JSON.parse(message.data.toString());
+        console.log(`[Pub/Sub] Raw payload: ${message.data.toString().substring(0, 500)}`);
         console.log(`[Pub/Sub] Incoming message body parsed. action: ${rawPayload.action}, remaining: ${rawPayload.remaining} (type: ${typeof rawPayload.remaining})`);
         if (rawPayload.action === 'RECORDS' && rawPayload.data) {
             isRecordsAction = true;
