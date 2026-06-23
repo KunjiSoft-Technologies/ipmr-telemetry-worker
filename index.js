@@ -43,19 +43,18 @@ async function handleMessage(message) {
     }
 
     let payload = {};
-    let isRecordsAction = false;
     let remaining = null;
     let unix = unixStr ? Number(unixStr) : Math.floor(Date.now() / 1000);
 
     try {
         const rawPayload = JSON.parse(message.data.toString());
         console.log(`[Pub/Sub] Incoming message body parsed. action: ${rawPayload.action}, remaining: ${rawPayload.remaining} (type: ${typeof rawPayload.remaining})`);
-        if (rawPayload.action === 'RECORDS' && rawPayload.data) {
-            isRecordsAction = true;
-            remaining = rawPayload.remaining !== undefined ? Number(rawPayload.remaining) : null;
-            payload = normalizePayload(rawPayload.data);
-        } else {
-            payload = normalizePayload(rawPayload);
+        
+        payload = normalizePayload(rawPayload);
+
+        // Check if remaining key is present directly in the raw payload (regardless of action)
+        if (rawPayload.remaining !== undefined && rawPayload.remaining !== null) {
+            remaining = Number(rawPayload.remaining);
         }
 
         // If the telemetry payload has an internal timestamp, use it
@@ -107,7 +106,7 @@ async function handleMessage(message) {
             cleanDisconnect: false
         };
 
-        if (isRecordsAction && remaining !== null) {
+        if (remaining !== null) {
             if (remaining > 0) {
                 // Mark in-memory uploading state
                 if (!_unit.uploadingPrev) {

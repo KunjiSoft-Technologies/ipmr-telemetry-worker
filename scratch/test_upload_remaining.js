@@ -138,14 +138,11 @@ async function runTests() {
         console.log('\nRunning Test 1: Upload in progress...');
         
         const payload = {
-            action: 'RECORDS',
+            timestamp: 1782145451,
             remaining: 45,
-            data: {
-                timestamp: 1782145451,
-                pv: {
-                    R: {
-                        v: { n: 0, x: 0, g: 0, w: 0 }
-                    }
+            pv: {
+                R: {
+                    v: { n: 0, x: 0, g: 0, w: 0 }
                 }
             }
         };
@@ -180,14 +177,11 @@ async function runTests() {
         dbMockData[prevDayCompletedPath] = null; // not completed yet
         
         const payload = {
-            action: 'RECORDS',
+            timestamp: 1782145451,
             remaining: 0,
-            data: {
-                timestamp: 1782145451,
-                pv: {
-                    R: {
-                        v: { n: 0, x: 0, g: 0, w: 0 }
-                    }
+            pv: {
+                R: {
+                    v: { n: 0, x: 0, g: 0, w: 0 }
                 }
             }
         };
