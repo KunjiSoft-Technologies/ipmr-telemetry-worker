@@ -188,24 +188,44 @@ const evaluateMetric = (metric, config, activeSession) => {
 /**
  * Run evaluation for all parameters.
  */
-function evaluateAll(normalizedThresholds, extractedMetrics, activeSessionsMap = {}) {
+function evaluateAll(normalizedThresholds, extractedMetrics, activeSessionsMap = {}, gateVoltageValid = true) {
     const results = {};
 
-    for (const [param, config] of Object.entries(normalizedThresholds)) {
-        if (!config.enabled) continue;
+    if (gateVoltageValid) {
+        for (const [param, config] of Object.entries(normalizedThresholds)) {
+            if (!config.enabled) continue;
 
-        const metric = extractedMetrics[param];
-        if (!metric) continue;
+            const metric = extractedMetrics[param];
+            if (!metric) continue;
 
-        const activeSession = activeSessionsMap[`${param}_max`] ||
-            activeSessionsMap[`${param}_min`] ||
-            activeSessionsMap[param] ||
-            null;
+            const activeSession = activeSessionsMap[`${param}_max`] ||
+                activeSessionsMap[`${param}_min`] ||
+                activeSessionsMap[param] ||
+                null;
 
-        const action = evaluateMetric(metric, config, activeSession);
+            const action = evaluateMetric(metric, config, activeSession);
 
-        if (action) {
-            results[param] = action;
+            if (action) {
+                results[param] = action;
+            }
+        }
+    }
+
+    // Resolve active sessions whose thresholds are turned off or missing
+    for (const [sessionKey, activeSession] of Object.entries(activeSessionsMap)) {
+        if (!activeSession) continue;
+
+        const param = activeSession.parameterId || sessionKey.split('_').slice(0, -1).join('_') || sessionKey;
+        const config = normalizedThresholds[param];
+
+        if (!config || !config.enabled) {
+            const metric = extractedMetrics[param];
+            const val = metric?.now ?? activeSession.peakValue ?? 0;
+            results[sessionKey] = {
+                action: 'RESOLVE',
+                type: activeSession.thresholdType || (sessionKey.endsWith('_min') ? 'min' : 'max'),
+                value: val
+            };
         }
     }
 

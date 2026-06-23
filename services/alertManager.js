@@ -24,17 +24,20 @@ async function processAlerts(uid, unit, type, machineId, unix, payload, redis, d
 
             const actualThresholdConfigs = thresholdsRaw.thresholds || thresholdsRaw;
 
-            if (Object.keys(actualThresholdConfigs).length > 0) {
-                const sessionKey = `alerts:${uid}:sessions:${machineId}`;
-                let activeSessionsRaw = await redis.get(sessionKey);
-                if (activeSessionsRaw === null) {
-                    const snap = await database.ref(`users/${uid}/alertSessionsActive/${machineId}`).once('value');
-                    activeSessionsRaw = snap.val() || {};
-                    await redis.set(sessionKey, JSON.stringify(activeSessionsRaw), 'EX', 60);
-                } else {
-                    activeSessionsRaw = typeof activeSessionsRaw === 'string' ? JSON.parse(activeSessionsRaw) : activeSessionsRaw;
-                }
+            const sessionKey = `alerts:${uid}:sessions:${machineId}`;
+            let activeSessionsRaw = await redis.get(sessionKey);
+            if (activeSessionsRaw === null) {
+                const snap = await database.ref(`users/${uid}/alertSessionsActive/${machineId}`).once('value');
+                activeSessionsRaw = snap.val() || {};
+                await redis.set(sessionKey, JSON.stringify(activeSessionsRaw), 'EX', 60);
+            } else {
+                activeSessionsRaw = typeof activeSessionsRaw === 'string' ? JSON.parse(activeSessionsRaw) : activeSessionsRaw;
+            }
 
+            const hasThresholds = Object.keys(actualThresholdConfigs).length > 0;
+            const hasActiveSessions = Object.keys(activeSessionsRaw).length > 0;
+
+            if (hasThresholds || hasActiveSessions) {
                 const normalizedThresholds = normalizeThresholds(actualThresholdConfigs);
                 const extractedMetrics = extractMetrics(payload);
 
@@ -44,14 +47,14 @@ async function processAlerts(uid, unit, type, machineId, unix, payload, redis, d
                     0
                 );
 
-                if (gateVoltage >= 50) {
-                    const evaluationResults = evaluateAll(normalizedThresholds, extractedMetrics, activeSessionsRaw);
+                const gateVoltageValid = gateVoltage >= 50;
 
-                    if (Object.keys(evaluationResults).length > 0) {
-                        const newActiveSessions = await processAlertBatch(uid, machineId, unix, evaluationResults, normalizedThresholds, activeSessionsRaw);
-                        _unit.active_alerts_count = Object.keys(newActiveSessions).length;
-                        await redis.set(sessionKey, JSON.stringify(newActiveSessions), 'EX', 60);
-                    }
+                const evaluationResults = evaluateAll(normalizedThresholds, extractedMetrics, activeSessionsRaw, gateVoltageValid);
+
+                if (Object.keys(evaluationResults).length > 0) {
+                    const newActiveSessions = await processAlertBatch(uid, machineId, unix, evaluationResults, normalizedThresholds, activeSessionsRaw);
+                    _unit.active_alerts_count = Object.keys(newActiveSessions).length;
+                    await redis.set(sessionKey, JSON.stringify(newActiveSessions), 'EX', 60);
                 }
             }
         }

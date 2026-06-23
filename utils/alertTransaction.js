@@ -23,8 +23,14 @@ const processAlertBatch = async (uid, machineId, unix, evaluationResults, config
     const newActiveSessions = { ...activeSessions };
     const dateKey = moment.unix(unix).format('YYYY-MM-DD');
 
-    for (const [param, actionInfo] of Object.entries(evaluationResults)) {
+    for (const [key, actionInfo] of Object.entries(evaluationResults)) {
         const { action, type, value } = actionInfo;
+        
+        let param = key;
+        if (type && key.endsWith(`_${type}`)) {
+            param = key.substring(0, key.length - type.length - 1);
+        }
+
         const config = configs[param];
         const sessionKey = `${param}_${type || activeSessions[`${param}_max`]?.thresholdType || activeSessions[`${param}_min`]?.thresholdType}`;
         const activeSession = activeSessions[sessionKey] || activeSessions[`${param}_max`] || activeSessions[`${param}_min`];
