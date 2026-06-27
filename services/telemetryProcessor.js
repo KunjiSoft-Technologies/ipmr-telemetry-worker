@@ -615,10 +615,11 @@ async function countProduction(database, uid, unit, name, value, time, unix, _un
 /**
  * countElectricity implementation.
  */
-async function countElectricity(database, uid, unit, type, name, value, time, unix, _unit) {
+async function countElectricity(database, uid, unit, type, name, value, time, unix, _unit, accumulatorIncrements = {}) {
     const isEQ = type === 'equipments';
     const today = getToday(uid, unix, _unit);
     const hourIndex = whatHour(uid, unix, _unit);
+    const hasAccumulators = Object.keys(accumulatorIncrements).length > 0;
 
     if (isEQ) {
         const equipmentObj = _unit.equipments[name];
@@ -641,6 +642,12 @@ async function countElectricity(database, uid, unit, type, name, value, time, un
             name: equipmentObj.name || '',
             division: division,
         };
+
+        if (hasAccumulators) {
+            for (const [param, inc] of Object.entries(accumulatorIncrements)) {
+                stats[`accumulators/${param}`] = admin.database.ServerValue.increment(inc);
+            }
+        }
 
         await database.ref(`users/${uid}/reports/equipments/${name}/daily/${today}/`).update(stats);
 
@@ -671,9 +678,25 @@ async function countElectricity(database, uid, unit, type, name, value, time, un
             ontime: admin.database.ServerValue.increment(ontime)
         };
 
+        const hourlyUpdate = { ...hourlyStats };
+        if (hasAccumulators) {
+            for (const [param, inc] of Object.entries(accumulatorIncrements)) {
+                hourlyUpdate[`accumulators/${param}`] = admin.database.ServerValue.increment(inc);
+            }
+        }
+
+        const hourlySet = { ...hourlyStats };
+        if (hasAccumulators) {
+            const accumSet = {};
+            for (const [param, inc] of Object.entries(accumulatorIncrements)) {
+                accumSet[param] = admin.database.ServerValue.increment(inc);
+            }
+            hourlySet.accumulators = accumSet;
+        }
+
         if (_unit.hourlyReportData[name] !== null && hourlyReportKey !== undefined) {
             if (hourlyReportValues.from <= seconds && seconds <= hourlyReportValues.time) {
-                await database.ref(`users/${uid}/reports/equipments/${name}/hourly/${today}/${hourlyReportKey}`).update(hourlyStats);
+                await database.ref(`users/${uid}/reports/equipments/${name}/hourly/${today}/${hourlyReportKey}`).update(hourlyUpdate);
             } else {
                 hourlyReportKey = Number(hourlyReportKey) + 1;
                 _unit.hourlyReportData[name] = {
@@ -681,7 +704,7 @@ async function countElectricity(database, uid, unit, type, name, value, time, un
                     values: { from: seconds, time: hourlyReportValues.time, status }
                 };
                 await database.ref(`users/${uid}/reports/equipments/${name}/hourly/${today}/${hourlyReportKey}`).set({
-                    ...hourlyStats,
+                    ...hourlySet,
                     from: seconds,
                     time: hourlyReportValues.time,
                     status
@@ -697,7 +720,7 @@ async function countElectricity(database, uid, unit, type, name, value, time, un
                 values: { from: seconds, time: nextTime, status }
             };
             await database.ref(`users/${uid}/reports/equipments/${name}/hourly/${today}/${key}`).set({
-                ...hourlyStats,
+                ...hourlySet,
                 from: seconds,
                 time: nextTime,
                 status
@@ -719,13 +742,29 @@ async function countElectricity(database, uid, unit, type, name, value, time, un
 
         const onlyFactory = isNaN(_unit.subFactory) || _unit.subFactory === -1;
         try {
+            const factoryHourlyUpdate = {
+                electricity_usage: admin.database.ServerValue.increment(electricity_consumption)
+            };
+            if (hasAccumulators) {
+                for (const [param, inc] of Object.entries(accumulatorIncrements)) {
+                    factoryHourlyUpdate[`accumulators/${param}`] = admin.database.ServerValue.increment(inc);
+                }
+            }
+
+            const factoryDailyUpdate = {
+                electricity_usage: admin.database.ServerValue.increment(electricity_consumption),
+                ...(onlyFactory ? shiftsData : {})
+            };
+            if (hasAccumulators) {
+                for (const [param, inc] of Object.entries(accumulatorIncrements)) {
+                    factoryDailyUpdate[`accumulators/${param}`] = admin.database.ServerValue.increment(inc);
+                }
+            }
+
             await Promise.all([
                 database.ref(`users/${uid}/equipments/${name}/updated`).set(moment().format("YYYY-MM-DD HH:mm:ss")),
-                database.ref(`users/${uid}/reports/factory/hourly/${today}/${hourIndex}/equipments/${name}/electricity_usage`).set(admin.database.ServerValue.increment(electricity_consumption)),
-                database.ref(`users/${uid}/reports/factory/daily/${today}`).update({
-                    electricity_usage: admin.database.ServerValue.increment(electricity_consumption),
-                    ...(onlyFactory ? shiftsData : {})
-                }),
+                database.ref(`users/${uid}/reports/factory/hourly/${today}/${hourIndex}/equipments/${name}`).update(factoryHourlyUpdate),
+                database.ref(`users/${uid}/reports/factory/daily/${today}`).update(factoryDailyUpdate),
                 database.ref(`users/${uid}/equipments/${name}/realtime_kw`).transaction(load => {
                     if (load === null) return { current: +realtime_kw.toFixed(2), previous: +realtime_kw.toFixed(2) };
                     return { current: +realtime_kw.toFixed(2), previous: +load.current.toFixed(2) || 0 };
@@ -766,6 +805,12 @@ async function countElectricity(database, uid, unit, type, name, value, time, un
             ontime: admin.database.ServerValue.increment(ontime),
             offtime: admin.database.ServerValue.increment(offtime)
         };
+
+        if (hasAccumulators) {
+            for (const [param, inc] of Object.entries(accumulatorIncrements)) {
+                stats[`accumulators/${param}`] = admin.database.ServerValue.increment(inc);
+            }
+        }
 
         const details = {};
         let mold_name = machineObj.mold_name || "NA";
@@ -910,11 +955,27 @@ async function countElectricity(database, uid, unit, type, name, value, time, un
             offtime: admin.database.ServerValue.increment(offtime),
         };
 
+        const hourlyUpdate = { ...hourlyStats };
+        if (hasAccumulators) {
+            for (const [param, inc] of Object.entries(accumulatorIncrements)) {
+                hourlyUpdate[`accumulators/${param}`] = admin.database.ServerValue.increment(inc);
+            }
+        }
+
+        const hourlySet = { ...hourlyStats };
+        if (hasAccumulators) {
+            const accumSet = {};
+            for (const [param, inc] of Object.entries(accumulatorIncrements)) {
+                accumSet[param] = admin.database.ServerValue.increment(inc);
+            }
+            hourlySet.accumulators = accumSet;
+        }
+
         if (_unit.hourlyReportData[name] !== null && hourlyReportKey !== undefined) {
             const hasNotChanged = isSameObject(hourDetails, hourlyReportValues);
             if (hourlyReportValues.from <= seconds && seconds <= hourlyReportValues.time) {
                 if (hasNotChanged) {
-                    await database.ref(`users/${uid}/reports/machines/${name}/hourly/${today}/${hourlyReportKey}`).update(hourlyStats);
+                    await database.ref(`users/${uid}/reports/machines/${name}/hourly/${today}/${hourlyReportKey}`).update(hourlyUpdate);
                 } else {
                     await database.ref(`users/${uid}/reports/machines/${name}/hourly/${today}/${hourlyReportKey}`).update({ time: seconds });
                     hourlyReportKey = Number(hourlyReportKey) + 1;
@@ -923,7 +984,7 @@ async function countElectricity(database, uid, unit, type, name, value, time, un
                         values: { from: seconds, time: hourlyReportValues.time, ...hourDetails }
                     };
                     await database.ref(`users/${uid}/reports/machines/${name}/hourly/${today}/${hourlyReportKey}`).set({
-                        ...hourlyStats,
+                        ...hourlySet,
                         from: seconds,
                         time: hourlyReportValues.time,
                         ...hourDetails
@@ -941,7 +1002,7 @@ async function countElectricity(database, uid, unit, type, name, value, time, un
                     values: { from: seconds, time: nextTime, ...hourDetails }
                 };
                 await database.ref(`users/${uid}/reports/machines/${name}/hourly/${today}/${hourlyReportKey}`).set({
-                    ...hourlyStats,
+                    ...hourlySet,
                     from: seconds,
                     time: nextTime,
                     ...hourDetails
@@ -979,16 +1040,32 @@ async function countElectricity(database, uid, unit, type, name, value, time, un
 
         const onlyFactory = isNaN(_unit.subFactory) || _unit.subFactory === -1;
         try {
+            const factoryHourlyUpdate = {
+                electricity_usage: admin.database.ServerValue.increment(electricity_consumption)
+            };
+            if (hasAccumulators) {
+                for (const [param, inc] of Object.entries(accumulatorIncrements)) {
+                    factoryHourlyUpdate[`accumulators/${param}`] = admin.database.ServerValue.increment(inc);
+                }
+            }
+
+            const factoryDailyUpdate = {
+                production: admin.database.ServerValue.increment(0),
+                shots: admin.database.ServerValue.increment(0),
+                material_usage: admin.database.ServerValue.increment(0),
+                electricity_usage: admin.database.ServerValue.increment(electricity_consumption),
+                ...(onlyFactory ? shiftsData : {})
+            };
+            if (hasAccumulators) {
+                for (const [param, inc] of Object.entries(accumulatorIncrements)) {
+                    factoryDailyUpdate[`accumulators/${param}`] = admin.database.ServerValue.increment(inc);
+                }
+            }
+
             await Promise.all([
                 database.ref(`users/${uid}/machines/${name}/updated`).set(moment().format('YYYY-MM-DD HH:mm:ss')),
-                database.ref(`users/${uid}/reports/factory/hourly/${today}/${hourIndex}/machines/${name}/electricity_usage`).set(admin.database.ServerValue.increment(electricity_consumption)),
-                database.ref(`users/${uid}/reports/factory/daily/${today}`).update({
-                    production: admin.database.ServerValue.increment(0),
-                    shots: admin.database.ServerValue.increment(0),
-                    material_usage: admin.database.ServerValue.increment(0),
-                    electricity_usage: admin.database.ServerValue.increment(electricity_consumption),
-                    ...(onlyFactory ? shiftsData : {})
-                }),
+                database.ref(`users/${uid}/reports/factory/hourly/${today}/${hourIndex}/machines/${name}`).update(factoryHourlyUpdate),
+                database.ref(`users/${uid}/reports/factory/daily/${today}`).update(factoryDailyUpdate),
                 database.ref(`users/${uid}/machines/${name}/realtime_kw`).transaction(load => {
                     if (load === null) return { current: +realtime_kw.toFixed(2), previous: +realtime_kw.toFixed(2) };
                     return { current: +realtime_kw.toFixed(2), previous: +load.current.toFixed(2) || 0 };
@@ -1172,8 +1249,15 @@ async function processPhaseValues(database, uid, unit, type, id, phase_values, u
                     electricityIncrement = increments['SUM_WH_Import'];
                 }
 
-                if (electricityIncrement > 0) {
-                    await countElectricity(database, uid, unit, type, id, electricityIncrement, safeTimeDiff, unix, _unit);
+                const accumulatorIncrements = {};
+                for (const [param, inc] of Object.entries(increments)) {
+                    if (inc > 0) {
+                        accumulatorIncrements[param] = inc / 1000;
+                    }
+                }
+
+                if (electricityIncrement > 0 || Object.keys(accumulatorIncrements).length > 0) {
+                    await countElectricity(database, uid, unit, type, id, electricityIncrement, safeTimeDiff, unix, _unit, accumulatorIncrements);
                 }
             }
         }

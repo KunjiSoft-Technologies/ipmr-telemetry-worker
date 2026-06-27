@@ -150,13 +150,17 @@ async function runTests() {
     try {
         console.log('Running test 2: processPhaseValues electricity counting...');
 
-        // Set previous accumulator value in mock DB
+        // Set previous accumulator values in mock DB
         const accumPath = `users/${uid}/reports/machines/mach001/accumulators/SUM_WH_Total`;
         dbMockData[accumPath] = 1000; // Wh
 
+        const vahAccumPath = `users/${uid}/reports/machines/mach001/accumulators/SUM_VAH`;
+        dbMockData[vahAccumPath] = 2000; // VAh
+
         const phaseValues = {
             SUM: {
-                SUM_WH_Total: { now: 1250 } // delta = 250 Wh
+                SUM_WH_Total: { now: 1250 }, // delta = 250 Wh (0.25 kWh)
+                SUM_VAH: { now: 2500 }        // delta = 500 VAh (0.5 kVAh)
             }
         };
 
@@ -165,17 +169,28 @@ async function runTests() {
         await processPhaseValues(mockDb, uid, unit, 'machines', 'mach001', phaseValues, unixTime, mockUnit);
 
         // Verification:
-        // Accumulator should be 1250 Wh
-        assert.strictEqual(dbMockData[accumPath], 1250, 'Accumulator should be updated to 1250');
+        // Accumulators should be updated in DB
+        assert.strictEqual(dbMockData[accumPath], 1250, 'Accumulator SUM_WH_Total should be updated to 1250');
+        assert.strictEqual(dbMockData[vahAccumPath], 2500, 'Accumulator SUM_VAH should be updated to 2500');
 
         // Electricity consumption = delta = 250 Wh
-        // Daily machine total should reflect electricity_usage increment
+        // Daily machine total should reflect electricity_usage increment and accumulators increments
         const dailyTotalPath = `users/${uid}/reports/machines/mach001/daily/2026-06-08/total`;
         console.log('Updated machine daily stats with electricity:', dbMockData[dailyTotalPath]);
 
-        // Factory daily report should have electricity_usage increment
+        const dailyStats = dbMockData[dailyTotalPath];
+        assert.deepStrictEqual(dailyStats.electricity_usage, { '.sv': { increment: 0.25 } });
+        assert.deepStrictEqual(dailyStats['accumulators/SUM_WH_Total'], { '.sv': { increment: 0.25 } });
+        assert.deepStrictEqual(dailyStats['accumulators/SUM_VAH'], { '.sv': { increment: 0.5 } });
+
+        // Factory daily report should have electricity_usage and accumulators increments
         const factoryDailyPath = `users/${uid}/reports/factory/daily/2026-06-08`;
         console.log('Factory daily report:', dbMockData[factoryDailyPath]);
+
+        const factoryDaily = dbMockData[factoryDailyPath];
+        assert.deepStrictEqual(factoryDaily.electricity_usage, { '.sv': { increment: 0.25 } });
+        assert.deepStrictEqual(factoryDaily['accumulators/SUM_WH_Total'], { '.sv': { increment: 0.25 } });
+        assert.deepStrictEqual(factoryDaily['accumulators/SUM_VAH'], { '.sv': { increment: 0.5 } });
 
         console.log('✓ Test 2 passed.');
     } catch (err) {
