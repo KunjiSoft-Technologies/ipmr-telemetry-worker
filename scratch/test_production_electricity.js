@@ -198,6 +198,47 @@ async function runTests() {
         process.exit(1);
     }
 
+    // Test 2.5: processPhaseValues with identical accumulator values (zero increment)
+    try {
+        console.log('Running test 2.5: processPhaseValues with identical accumulator values (zero increment)...');
+
+        const phaseValues = {
+            SUM: {
+                SUM_WH_Total: { now: 1250 }, // delta should be 0 Wh
+                SUM_VAH: { now: 2500 }        // delta should be 0 VAh
+            }
+        };
+
+        mockUnit.previousUnix = unixTime;
+        const nextUnixTime = unixTime + 30; // 30 seconds later
+
+        // Clear mock DB data for updates to see fresh increments
+        const dailyTotalPath = `users/${uid}/reports/machines/mach001/daily/2026-06-08/total`;
+        delete dbMockData[dailyTotalPath];
+
+        await processPhaseValues(mockDb, uid, unit, 'machines', 'mach001', phaseValues, nextUnixTime, mockUnit);
+
+        const accumPath = `users/${uid}/reports/machines/mach001/accumulators/SUM_WH_Total`;
+        const vahAccumPath = `users/${uid}/reports/machines/mach001/accumulators/SUM_VAH`;
+
+        // Accumulators in DB should NOT change
+        assert.strictEqual(dbMockData[accumPath], 1250, 'Accumulator SUM_WH_Total should remain 1250');
+        assert.strictEqual(dbMockData[vahAccumPath], 2500, 'Accumulator SUM_VAH should remain 2500');
+
+        // Daily machine total should reflect 0 electricity_usage and 0 accumulators increments
+        console.log('Updated machine daily stats with zero electricity:', dbMockData[dailyTotalPath]);
+
+        const dailyStats = dbMockData[dailyTotalPath];
+        assert.deepStrictEqual(dailyStats.electricity_usage, { '.sv': { increment: 0 } });
+        assert.deepStrictEqual(dailyStats['accumulators/SUM_WH_Total'], { '.sv': { increment: 0 } });
+        assert.deepStrictEqual(dailyStats['accumulators/SUM_VAH'], { '.sv': { increment: 0 } });
+
+        console.log('✓ Test 2.5 passed.');
+    } catch (err) {
+        console.error('✗ Test 2.5 failed:', err);
+        process.exit(1);
+    }
+
     // Test 3: Machine status transition to OFF on idle
     try {
         console.log('Running test 3: Machine idle timeout status transition...');

@@ -1229,8 +1229,22 @@ async function processPhaseValues(database, uid, unit, type, id, phase_values, u
                         const result = await database.ref(`users/${uid}/reports/${type}/${id}/accumulators/${param}`).transaction((current) => {
                             const currentValue = Number(current);
                             const dbValue = Number.isFinite(currentValue) ? currentValue : 0;
-                            incrementBy = dbValue < incomingValue ? (incomingValue - dbValue) : incomingValue;
-                            return dbValue + incrementBy;
+                            
+                            if (current === null || dbValue === 0) {
+                                incrementBy = 0;
+                                return incomingValue;
+                            }
+                            if (dbValue < incomingValue) {
+                                incrementBy = incomingValue - dbValue;
+                                return incomingValue;
+                            }
+                            if (dbValue === incomingValue) {
+                                incrementBy = 0;
+                                return dbValue;
+                            }
+                            // dbValue > incomingValue (rollover)
+                            incrementBy = incomingValue;
+                            return dbValue + incomingValue;
                         });
 
                         if (result.committed) {
@@ -1251,12 +1265,10 @@ async function processPhaseValues(database, uid, unit, type, id, phase_values, u
 
                 const accumulatorIncrements = {};
                 for (const [param, inc] of Object.entries(increments)) {
-                    if (inc > 0) {
-                        accumulatorIncrements[param] = inc / 1000;
-                    }
+                    accumulatorIncrements[param] = inc / 1000;
                 }
 
-                if (electricityIncrement > 0 || Object.keys(accumulatorIncrements).length > 0) {
+                if (Object.keys(accumulatorIncrements).length > 0) {
                     await countElectricity(database, uid, unit, type, id, electricityIncrement, safeTimeDiff, unix, _unit, accumulatorIncrements);
                 }
             }
