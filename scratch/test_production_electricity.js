@@ -61,7 +61,7 @@ async function runTests() {
 
     const uid = 'user123';
     const unit = 10;
-    const unixTime = 1780896000; // June 8, 2026 08:00:00 AM
+    const unixTime = 1780916400; // June 8, 2026 11:00:00 AM UTC
 
     const mockUnit = {
         info: {
@@ -111,8 +111,8 @@ async function runTests() {
         // Simulate 2 production pulses on signal X1
         const digitalValues = {
             X1: [
-                { high: 1780896002, low: 1780896005 },
-                { high: 1780896010, low: 1780896013 }
+                { high: unixTime + 2, low: unixTime + 5 },
+                { high: unixTime + 10, low: unixTime + 13 }
             ]
         };
 

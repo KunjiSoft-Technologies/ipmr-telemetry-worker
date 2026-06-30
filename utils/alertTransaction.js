@@ -21,7 +21,7 @@ const processAlertBatch = async (uid, machineId, unix, evaluationResults, config
     const updates = {};
     const statsUpdates = [];
     const newActiveSessions = { ...activeSessions };
-    const dateKey = moment.unix(unix).format('YYYY-MM-DD');
+    const dateKey = moment.unix(unix).utc().format('YYYY-MM-DD');
 
     for (const [key, actionInfo] of Object.entries(evaluationResults)) {
         const { action, type, value } = actionInfo;

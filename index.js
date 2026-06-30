@@ -1,6 +1,6 @@
 require('dotenv').config();
 const { PubSub } = require('@google-cloud/pubsub');
-const moment = require('moment');
+const moment = require('moment-timezone');
 const database = require('./config/database');
 const redis = require('./config/redis');
 const { writeInfluxRecord } = require('./config/Influx');
@@ -131,7 +131,7 @@ async function handleMessage(message) {
 
                 updateFields.realtime = false;
                 updateFields.uploadRemaining = remaining;
-                updateFields.uploadedTil = moment.unix(unix).format("YYYY-MM-DD HH:mm:ss");
+                updateFields.uploadedTil = moment.unix(unix).utc().format("YYYY-MM-DD HH:mm:ss");
             } else if (remaining === 0) {
                 // Offline upload complete
                 _unit.uploadingPrev = { status: false, time: null };

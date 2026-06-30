@@ -1,5 +1,5 @@
 const admin = require('firebase-admin');
-const moment = require('moment');
+const moment = require('moment-timezone');
 const { getToday, whatHour, secToTime } = require('../utils/timeHelpers');
 const { toRange, countOverlapEvents } = require('../utils/overlapHelpers');
 
@@ -60,7 +60,7 @@ async function verifySequence(database, uid, unit, payload, _unit) {
         await database.ref(`/users/${uid}/packetIDErrors/units/${unit}/`).push({
             expected: expectedPacketID,
             got: packet_id_new,
-            time: moment().format('YYYY-MM-DD HH:mm:ss')
+            time: moment().tz(_unit?.info?.timezone || "Asia/Karachi").format('YYYY-MM-DD HH:mm:ss')
         });
     }
 
@@ -361,7 +361,8 @@ async function countProduction(database, uid, unit, name, value, time, unix, _un
                         machineObj["monitor-downtime"] = percentage < 100;
                     }
                     if (target.due) {
-                        const dueMissed = unix > moment(target.due).unix();
+                        const tz = _unit?.info?.timezone || "Asia/Karachi";
+                        const dueMissed = unix > moment.tz(target.due, tz).unix();
                         if (dueMissed && !target.dueMissed) target.dueMissed = dueMissed;
                     }
                     if (!target.startedAt) target.startedAt = admin.database.ServerValue.TIMESTAMP;
@@ -463,7 +464,7 @@ async function countProduction(database, uid, unit, name, value, time, unix, _un
         }
     }
 
-    const datetime = moment.unix(unix);
+    const datetime = moment.unix(unix).utc();
     let sec = (datetime.hours() * 3600) + datetime.minutes() * 60 + datetime.seconds();
     let hoursx = sec <= (Number(_unit.info.shift_a_start || 0) + 59) ? 24 + datetime.hours() : datetime.hours();
     const seconds = (hoursx * 3600) + datetime.minutes() * 60 + datetime.seconds();
@@ -559,7 +560,7 @@ async function countProduction(database, uid, unit, name, value, time, unix, _un
 
     try {
         await Promise.all([
-            database.ref(`users/${uid}/machines/${name}/updated`).set(moment().format('YYYY-MM-DD HH:mm:ss')),
+            database.ref(`users/${uid}/machines/${name}/updated`).set(moment().tz(_unit?.info?.timezone || "Asia/Karachi").format('YYYY-MM-DD HH:mm:ss')),
             database.ref(`users/${uid}/machines/${name}/production_meters_speed`).transaction(speed => {
                 if (speed === null) return { current: +(production_meters_speed || 0).toFixed(2), previous: +(production_meters_speed || 0).toFixed(2) };
                 return { current: +(production_meters_speed || 0).toFixed(2), previous: +speed.current.toFixed(2) || 0 };
@@ -668,7 +669,7 @@ async function countElectricity(database, uid, unit, type, name, value, time, un
             }
         }
 
-        const datetime = moment.unix(unix);
+        const datetime = moment.unix(unix).utc();
         let sec = (datetime.hours() * 3600) + datetime.minutes() * 60 + datetime.seconds();
         let hoursx = sec <= (Number(_unit.info.shift_a_start || 0) + 59) ? 24 + datetime.hours() : datetime.hours();
         const seconds = (hoursx * 3600) + datetime.minutes() * 60 + datetime.seconds();
@@ -762,7 +763,7 @@ async function countElectricity(database, uid, unit, type, name, value, time, un
             }
 
             await Promise.all([
-                database.ref(`users/${uid}/equipments/${name}/updated`).set(moment().format("YYYY-MM-DD HH:mm:ss")),
+                database.ref(`users/${uid}/equipments/${name}/updated`).set(moment().tz(_unit?.info?.timezone || "Asia/Karachi").format("YYYY-MM-DD HH:mm:ss")),
                 database.ref(`users/${uid}/reports/factory/hourly/${today}/${hourIndex}/equipments/${name}`).update(factoryHourlyUpdate),
                 database.ref(`users/${uid}/reports/factory/daily/${today}`).update(factoryDailyUpdate),
                 database.ref(`users/${uid}/equipments/${name}/realtime_kw`).transaction(load => {
@@ -916,7 +917,7 @@ async function countElectricity(database, uid, unit, type, name, value, time, un
             }
         }
 
-        const datetime = moment.unix(unix);
+        const datetime = moment.unix(unix).utc();
         let sec = (datetime.hours() * 3600) + datetime.minutes() * 60 + datetime.seconds();
         let hoursx = sec <= (Number(_unit.info.shift_a_start || 0) + 59) ? 24 + datetime.hours() : datetime.hours();
         const seconds = (hoursx * 3600) + datetime.minutes() * 60 + datetime.seconds();
@@ -1063,7 +1064,7 @@ async function countElectricity(database, uid, unit, type, name, value, time, un
             }
 
             await Promise.all([
-                database.ref(`users/${uid}/machines/${name}/updated`).set(moment().format('YYYY-MM-DD HH:mm:ss')),
+                database.ref(`users/${uid}/machines/${name}/updated`).set(moment().tz(_unit?.info?.timezone || "Asia/Karachi").format('YYYY-MM-DD HH:mm:ss')),
                 database.ref(`users/${uid}/reports/factory/hourly/${today}/${hourIndex}/machines/${name}`).update(factoryHourlyUpdate),
                 database.ref(`users/${uid}/reports/factory/daily/${today}`).update(factoryDailyUpdate),
                 database.ref(`users/${uid}/machines/${name}/realtime_kw`).transaction(load => {
@@ -1102,7 +1103,7 @@ async function ensureHourlyReportKey(database, uid, type, id, today, unix, _unit
     
     // If not found in RTDB, we need to create/initialize the first segment (key: 0)
     const key = 0;
-    const datetime = moment.unix(unix);
+    const datetime = moment.unix(unix).utc();
     const sec = (datetime.hours() * 3600) + datetime.minutes() * 60 + datetime.seconds();
     const hoursx = sec <= (Number(_unit.info.shift_a_start || 0) + 59) ? 24 + datetime.hours() : datetime.hours();
     const seconds = (hoursx * 3600) + datetime.minutes() * 60 + datetime.seconds();
@@ -1472,14 +1473,14 @@ async function processDigitalValues(database, uid, unit, type, id, digital_value
                 if (target.timer >= idleTimeSet * 60) {
                     _unit.machines[id].machine_status = false;
                     target.timer = 0;
-                    await turnOff(database, id, uid, unit, false, moment.unix(unix).format('YYYY-MM-DD HH:mm:ss'), unix, _unit);
+                    await turnOff(database, id, uid, unit, false, moment.unix(unix).utc().format('YYYY-MM-DD HH:mm:ss'), unix, _unit);
                 }
             }
         } else {
             target.timer = 0;
             if (!_unit.machines?.[id]?.machine_status) {
                 _unit.machines[id].machine_status = true;
-                await turnOn(database, id, uid, unit, false, moment.unix(unix).format('YYYY-MM-DD HH:mm:ss'), unix, _unit);
+                await turnOn(database, id, uid, unit, false, moment.unix(unix).utc().format('YYYY-MM-DD HH:mm:ss'), unix, _unit);
             }
         }
 

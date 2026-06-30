@@ -158,7 +158,7 @@ async function runTests() {
         assert.strictEqual(dbMockData[unitPath].realtime, false, 'realtime should be false during upload');
         assert.strictEqual(dbMockData[unitPath].uploadRemaining, 45, 'uploadRemaining should be 45');
         const moment = require('moment');
-        assert.strictEqual(dbMockData[unitPath].uploadedTil, moment.unix(1782145451).format("YYYY-MM-DD HH:mm:ss"), 'uploadedTil should match packet timestamp');
+        assert.strictEqual(dbMockData[unitPath].uploadedTil, moment.unix(1782145451).utc().format("YYYY-MM-DD HH:mm:ss"), 'uploadedTil should match packet timestamp');
         assert.strictEqual(mockUnit.uploadingPrev.status, true, 'uploadingPrev status should be true');
 
         console.log('✓ Test 1 passed.');

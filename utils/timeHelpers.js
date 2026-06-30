@@ -1,7 +1,16 @@
-const moment = require('moment');
+const moment = require('moment-timezone');
+
+const getLocalMoment = (unix, _unit) => {
+    const tz = _unit?.info?.timezone || "Asia/Karachi";
+    if (unix) {
+        return moment.unix(unix).utc();
+    } else {
+        return moment().tz(tz);
+    }
+};
 
 const getToday = (uid, unix = undefined, _unit) => {
-    const now = unix ? moment.unix(unix) : moment();
+    const now = getLocalMoment(unix, _unit);
     const now_seconds = now.hours() * 60 * 60 + now.minutes() * 60 + now.seconds();
     if (!_unit || !_unit.info) return now.format('YYYY-MM-DD');
     if (_unit.info.shift_a_start !== undefined && now_seconds <= (_unit.info.shift_a_start + 59)) {
@@ -11,7 +20,7 @@ const getToday = (uid, unix = undefined, _unit) => {
 };
 
 const whatHour = (uid, unix = undefined, _unit) => {
-    const now = unix ? moment.unix(unix) : moment();
+    const now = getLocalMoment(unix, _unit);
     let now_seconds = now.hours() * 60 * 60 + now.minutes() * 60 + now.seconds();
     if (!_unit || !_unit.info || _unit.info.shift_a_start === undefined) {
         return now.hours() + 1; // Fallback helper if shift_a_start is not defined
