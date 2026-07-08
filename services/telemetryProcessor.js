@@ -1226,29 +1226,88 @@ async function processPhaseValues(database, uid, unit, type, id, phase_values, u
                     if (!Number.isFinite(incomingValue)) continue;
 
                     txPromises.push((async () => {
+                        // Fetch the legacy value once to initialize lifetime on the very first run
+                        let legacyValue = null;
+                        const stateRef = database.ref(`users/${uid}/reports/${type}/${id}/accumulators_state/${param}`);
+                        const stateSnap = await stateRef.once('value');
+                        if (!stateSnap.exists()) {
+                            const legacySnap = await database.ref(`users/${uid}/reports/${type}/${id}/accumulators/${param}`).once('value');
+                            legacyValue = legacySnap.val();
+                        }
+
                         let incrementBy = 0;
-                        const result = await database.ref(`users/${uid}/reports/${type}/${id}/accumulators/${param}`).transaction((current) => {
-                            const currentValue = Number(current);
-                            const dbValue = Number.isFinite(currentValue) ? currentValue : 0;
-                            
-                            if (current === null || dbValue === 0) {
+                        const result = await stateRef.transaction((current) => {
+                            let dbRawValue = 0;
+                            let dbLifetimeValue = 0;
+                            let isInitialized = false;
+
+                            if (current !== null) {
+                                const rawVal = Number(current.raw);
+                                dbRawValue = Number.isFinite(rawVal) ? rawVal : 0;
+                                const lifeVal = Number(current.lifetime);
+                                dbLifetimeValue = Number.isFinite(lifeVal) ? lifeVal : 0;
+                                isInitialized = true;
+                            } else if (legacyValue !== null && Number.isFinite(Number(legacyValue))) {
+                                const legVal = Number(legacyValue);
+                                dbRawValue = legVal;
+                                dbLifetimeValue = legVal;
+                                isInitialized = true;
+                            }
+
+                            if (!isInitialized) {
+                                // Truly first initialization of state with no legacy value
                                 incrementBy = 0;
-                                return incomingValue;
+                                return {
+                                    raw: incomingValue,
+                                    lifetime: incomingValue
+                                };
                             }
-                            if (dbValue < incomingValue) {
-                                incrementBy = incomingValue - dbValue;
-                                return incomingValue;
-                            }
-                            if (dbValue === incomingValue) {
+
+                            // Rule 1: If incoming value is 0, we suspect a temporary Modbus failure/initialization state.
+                            // We ignore it (do not update raw or lifetime, return 0 increment).
+                            if (incomingValue === 0) {
                                 incrementBy = 0;
-                                return dbValue;
+                                return current || { raw: dbRawValue, lifetime: dbLifetimeValue };
                             }
-                            // dbValue > incomingValue (rollover)
+
+                            // Rule 2: If previous raw value was 0, it means we are recovering from a 0 state (boot-up / connection recovery).
+                            // We treat this as the new raw baseline and return 0 increment.
+                            if (dbRawValue === 0) {
+                                incrementBy = 0;
+                                return {
+                                    raw: incomingValue,
+                                    lifetime: dbLifetimeValue
+                                };
+                            }
+
+                            // Rule 3: Normal case - incoming value matches previous raw value
+                            if (dbRawValue === incomingValue) {
+                                incrementBy = 0;
+                                return current || { raw: dbRawValue, lifetime: dbLifetimeValue };
+                            }
+
+                            // Rule 4: Normal case - incoming value is greater than previous raw value
+                            if (incomingValue > dbRawValue) {
+                                incrementBy = incomingValue - dbRawValue;
+                                return {
+                                    raw: incomingValue,
+                                    lifetime: dbLifetimeValue + incrementBy
+                                };
+                            }
+
+                            // Rule 5: Rollover/Reset case - incoming value is less than previous raw value
+                            // We increment lifetime by incomingValue (since it reset to 0 and grew to incomingValue)
                             incrementBy = incomingValue;
-                            return dbValue + incomingValue;
+                            return {
+                                raw: incomingValue,
+                                lifetime: dbLifetimeValue + incrementBy
+                            };
                         });
 
-                        if (result.committed) {
+                        if (result.committed && result.snapshot && result.snapshot.val()) {
+                            const newLifetime = result.snapshot.val().lifetime;
+                            // Update legacy accumulators key so existing client views work
+                            await database.ref(`users/${uid}/reports/${type}/${id}/accumulators/${param}`).set(newLifetime);
                             increments[param] = incrementBy;
                         }
                     })());

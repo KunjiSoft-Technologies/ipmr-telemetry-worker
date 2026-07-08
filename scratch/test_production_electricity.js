@@ -239,6 +239,116 @@ async function runTests() {
         process.exit(1);
     }
 
+    // Test 2.6: Temporary 0 packet (Modbus failure) and recovery
+    try {
+        console.log('Running test 2.6: Temporary 0 value (Modbus failure) and recovery...');
+        
+        // Accumulator starts at 1250 from Test 2.5
+        // Send a 0 packet (Modbus failure)
+        const phaseValuesZero = {
+            SUM: {
+                SUM_WH_Total: { now: 0 },
+                SUM_VAH: { now: 0 }
+            }
+        };
+        
+        // Reset daily stats increments for validation
+        const dailyTotalPath = `users/${uid}/reports/machines/mach001/daily/2026-06-08/total`;
+        dbMockData[dailyTotalPath] = {
+            electricity_usage: { '.sv': { increment: 0 } },
+            'accumulators/SUM_WH_Total': { '.sv': { increment: 0 } }
+        };
+
+        await processPhaseValues(mockDb, uid, unit, 'machines', 'mach001', phaseValuesZero, unixTime, mockUnit);
+
+        // Verification for zero packet:
+        // No delta should be recorded, legacy accum path remains 1250
+        const accumPath = `users/${uid}/reports/machines/mach001/accumulators/SUM_WH_Total`;
+        assert.strictEqual(dbMockData[accumPath], 1250, 'Accumulator should remain 1250 on zero packet');
+        assert.strictEqual(dbMockData[dailyTotalPath].electricity_usage['.sv'].increment, 0, 'No electricity usage should be incremented');
+
+        // Now send packet recovering to the actual reading 1260 (10 Wh delta since 1250)
+        const phaseValuesRecover = {
+            SUM: {
+                SUM_WH_Total: { now: 1260 },
+                SUM_VAH: { now: 2520 }
+            }
+        };
+
+        await processPhaseValues(mockDb, uid, unit, 'machines', 'mach001', phaseValuesRecover, unixTime, mockUnit);
+
+        // Verification for recovery packet:
+        // Delta should be 10 Wh (0.01 kWh), legacy accum path becomes 1260
+        assert.strictEqual(dbMockData[accumPath], 1260, 'Accumulator should become 1260');
+        assert.strictEqual(dbMockData[dailyTotalPath].electricity_usage['.sv'].increment, 0.01, 'Electricity usage should increment by 0.01 kWh');
+
+        console.log('✓ Test 2.6 passed.');
+    } catch (err) {
+        console.error('✗ Test 2.6 failed:', err);
+        process.exit(1);
+    }
+
+    // Test 2.7: Genuine reset (from 1260 -> 0 -> 20 -> 80)
+    try {
+        console.log('Running test 2.7: Genuine energy meter reset...');
+
+        // Step 1: Send 0 packet (this initializes the reset state)
+        const phaseValuesZero = {
+            SUM: {
+                SUM_WH_Total: { now: 0 },
+                SUM_VAH: { now: 0 }
+            }
+        };
+        const dailyTotalPath = `users/${uid}/reports/machines/mach001/daily/2026-06-08/total`;
+        dbMockData[dailyTotalPath] = {
+            electricity_usage: { '.sv': { increment: 0 } },
+            'accumulators/SUM_WH_Total': { '.sv': { increment: 0 } }
+        };
+
+        await processPhaseValues(mockDb, uid, unit, 'machines', 'mach001', phaseValuesZero, unixTime, mockUnit);
+
+        // Raw/legacy is still at 1260, delta is 0
+        const accumPath = `users/${uid}/reports/machines/mach001/accumulators/SUM_WH_Total`;
+        assert.strictEqual(dbMockData[accumPath], 1260, 'Accumulator should remain 1260 on reset 0 packet');
+
+        // Step 2: Send 20 packet (meter starting up from 0 to 20)
+        const phaseValues20 = {
+            SUM: {
+                SUM_WH_Total: { now: 20 },
+                SUM_VAH: { now: 40 }
+            }
+        };
+        await processPhaseValues(mockDb, uid, unit, 'machines', 'mach001', phaseValues20, unixTime, mockUnit);
+
+        // Delta should be 20 Wh (0.02 kWh), lifetime becomes 1260 + 20 = 1280
+        assert.strictEqual(dbMockData[accumPath], 1280, 'Accumulator should update to 1280 (1260 legacy + 20 reset)');
+        assert.strictEqual(dbMockData[dailyTotalPath].electricity_usage['.sv'].increment, 0.02, 'Electricity usage should increment by 0.02 kWh');
+
+        // Step 3: Send 80 packet (meter incrementing from 20 to 80)
+        // Reset daily stats to isolate the increment from 20 to 80 (delta = 60 Wh = 0.06 kWh)
+        dbMockData[dailyTotalPath] = {
+            electricity_usage: { '.sv': { increment: 0 } },
+            'accumulators/SUM_WH_Total': { '.sv': { increment: 0 } }
+        };
+
+        const phaseValues80 = {
+            SUM: {
+                SUM_WH_Total: { now: 80 },
+                SUM_VAH: { now: 160 }
+            }
+        };
+        await processPhaseValues(mockDb, uid, unit, 'machines', 'mach001', phaseValues80, unixTime, mockUnit);
+
+        // Delta should be 60 Wh (0.06 kWh), lifetime becomes 1280 + 60 = 1340
+        assert.strictEqual(dbMockData[accumPath], 1340, 'Accumulator should update to 1340 (1280 + 60)');
+        assert.strictEqual(dbMockData[dailyTotalPath].electricity_usage['.sv'].increment, 0.06, 'Electricity usage should increment by 0.06 kWh');
+
+        console.log('✓ Test 2.7 passed.');
+    } catch (err) {
+        console.error('✗ Test 2.7 failed:', err);
+        process.exit(1);
+    }
+
     // Test 3: Machine status transition to OFF on idle
     try {
         console.log('Running test 3: Machine idle timeout status transition...');
