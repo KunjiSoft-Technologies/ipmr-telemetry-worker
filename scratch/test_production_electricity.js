@@ -384,15 +384,14 @@ async function runTests() {
         process.exit(1);
     }
 
-    // Test 4: processDigitalValues with series signal overlap and new inputs structure
+    // Test 4: processDigitalValues with new inputs structure (no series overlap)
     try {
-        console.log('Running test 4: processDigitalValues with series overlap configuration...');
+        console.log('Running test 4: processDigitalValues with direct pulse counting...');
 
-        // Mock nested inputs configuration matching the live database
+        // Mock inputs configuration
         const mockInputs = {
             X1: {
-                label: "Injection",
-                series: "X2"
+                label: "Injection"
             },
             X2: {
                 label: "Unit Forward"
@@ -408,9 +407,7 @@ async function runTests() {
             material_usage: { '.sv': { increment: 0 } }
         };
 
-        // Setup mock digital values where:
-        // - X1 has two pulses at: unixTime + 10, unixTime + 40
-        // - X2 has two pulses at: unixTime + 10 (overlap), unixTime + 50 (no overlap)
+        // Setup mock digital values
         const digitalValues = {
             X1: [
                 { high: unixTime + 10, low: unixTime + 10 },
@@ -435,11 +432,10 @@ async function runTests() {
         await processDigitalValues(mockDb, uid, unit, 'machines', 'mach001', digitalValues, unixTime, mockUnit, mockInputs);
 
         // Verification:
-        // Only the pulse at unixTime + 10 overlaps. The pulse at unixTime + 40 does not overlap with any pulse in X2.
-        // So valid shots should be 1!
+        // No overlap logic is run. Both pulses on X1 should be counted directly (yielding 2 increments).
         const stats = dbMockData[dailyTotalPath];
         assert.ok(stats, 'Daily machine stats should exist');
-        assert.deepStrictEqual(stats.shots, { '.sv': { increment: 1 } }, 'Shots should increment by 1 (only 1 overlapping pulse)');
+        assert.deepStrictEqual(stats.shots, { '.sv': { increment: 2 } }, 'Shots should increment by 2');
 
         console.log('✓ Test 4 passed.');
     } catch (err) {

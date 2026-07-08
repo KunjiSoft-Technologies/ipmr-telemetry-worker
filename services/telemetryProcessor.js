@@ -1,7 +1,7 @@
 const admin = require('firebase-admin');
 const moment = require('moment-timezone');
 const { getToday, whatHour, secToTime } = require('../utils/timeHelpers');
-const { toRange, countOverlapEvents } = require('../utils/overlapHelpers');
+const { toRange } = require('../utils/overlapHelpers');
 
 /**
  * Checks for replay/duplicate packets.
@@ -1470,16 +1470,6 @@ async function processDigitalValues(database, uid, unit, type, id, digital_value
         let countToIncrement = validLogs.length;
         const upperSignal = signal.toUpperCase();
         if (productionSignal && upperSignal === productionSignal.toUpperCase()) {
-            // Support series signal overlapping if configured
-            const signalConfig = inputs?.[signal] || inputs?.[signal.toLowerCase()] || inputs?.[signal.toUpperCase()];
-            const seriesSignal = signalConfig?.series;
-            if (typeof seriesSignal === 'string' && digital_values) {
-                // Find matching series logs key case-insensitively
-                const seriesKey = Object.keys(digital_values).find(k => k.toUpperCase() === seriesSignal.toUpperCase());
-                if (seriesKey && Array.isArray(digital_values[seriesKey])) {
-                    countToIncrement = countOverlapEvents(validLogs, digital_values[seriesKey]);
-                }
-            }
             productionCountIncrement = countToIncrement;
         }
 
