@@ -1342,7 +1342,7 @@ async function processPhaseValues(database, uid, unit, type, id, phase_values, u
             const incomingAvg = pv?.avg !== undefined && pv?.avg !== null ? Number(pv.avg) : (pv?.now !== undefined ? Number(pv.now) : null);
 
             // 1. Process Daily Report (retain everything, auto-detect stats keys)
-            const dailyStatsKeys = pv?.min !== undefined && pv?.min !== null ? ["min", "max", "avg"] : ["max", "avg"];
+            const dailyStatsKeys = (pv?.min !== undefined && pv?.min !== null || param === "POWER_FACTOR") ? ["min", "max", "avg"] : ["max", "avg"];
             const hasDailyMin = dailyStatsKeys.includes("min") && incomingMin !== null && Number.isFinite(incomingMin);
             const hasDailyMax = dailyStatsKeys.includes("max") && incomingMax !== null && Number.isFinite(incomingMax);
             const hasDailyAvg = dailyStatsKeys.includes("avg") && incomingAvg !== null && Number.isFinite(incomingAvg);
@@ -1383,13 +1383,14 @@ async function processPhaseValues(database, uid, unit, type, id, phase_values, u
                     "VOLTAGE": ["min", "max", "avg"],
                     "L_L_VOLTAGE": ["min", "max", "avg"],
                     "AMPERE": ["max", "avg"],
-                    "POWER": ["max", "avg"]
+                    "POWER": ["max", "avg"],
+                    "POWER_FACTOR": ["min", "max", "avg"]
                 },
                 SUM: {
                     "VOLTAGE": ["min", "max", "avg"],
                     "L_L_VOLTAGE": ["min", "max", "avg"],
                     "FREQUENCY": ["min", "max", "avg"],
-                    "POWER_FACTOR": ["max", "avg"],
+                    "POWER_FACTOR": ["min", "max", "avg"],
                     "CURRENT_THD": ["max", "avg"],
                     "VOLTAGE_THD": ["max", "avg"],
                     "AMPERE": ["max", "avg"],

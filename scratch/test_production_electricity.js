@@ -160,7 +160,11 @@ async function runTests() {
         const phaseValues = {
             SUM: {
                 SUM_WH_Total: { now: 1250 }, // delta = 250 Wh (0.25 kWh)
-                SUM_VAH: { now: 2500 }        // delta = 500 VAh (0.5 kVAh)
+                SUM_VAH: { now: 2500 },       // delta = 500 VAh (0.5 kVAh)
+                POWER_FACTOR: { max: 0.95, avg: 0.90, now: 0.92 }
+            },
+            R: {
+                POWER_FACTOR: { max: 0.96, avg: 0.91, now: 0.93 }
             }
         };
 
@@ -172,6 +176,20 @@ async function runTests() {
         // Accumulators should be updated in DB
         assert.strictEqual(dbMockData[accumPath], 1250, 'Accumulator SUM_WH_Total should be updated to 1250');
         assert.strictEqual(dbMockData[vahAccumPath], 2500, 'Accumulator SUM_VAH should be updated to 2500');
+
+        // Verify POWER_FACTOR daily report min/max/avg for SUM and R phase
+        const sumPfDailyPath = `users/${uid}/reports/machines/mach001/daily/2026-06-08/phase_values/SUM/POWER_FACTOR`;
+        const rPfDailyPath = `users/${uid}/reports/machines/mach001/daily/2026-06-08/phase_values/R/POWER_FACTOR`;
+
+        assert.ok(dbMockData[sumPfDailyPath], 'Daily SUM POWER_FACTOR should exist');
+        assert.strictEqual(dbMockData[sumPfDailyPath].min, 0.92, 'Daily SUM POWER_FACTOR min should fall back to now');
+        assert.strictEqual(dbMockData[sumPfDailyPath].max, 0.95, 'Daily SUM POWER_FACTOR max should be 0.95');
+        assert.strictEqual(dbMockData[sumPfDailyPath].avg, 0.90, 'Daily SUM POWER_FACTOR avg should be 0.90');
+
+        assert.ok(dbMockData[rPfDailyPath], 'Daily R POWER_FACTOR should exist');
+        assert.strictEqual(dbMockData[rPfDailyPath].min, 0.93, 'Daily R POWER_FACTOR min should fall back to now');
+        assert.strictEqual(dbMockData[rPfDailyPath].max, 0.96, 'Daily R POWER_FACTOR max should be 0.96');
+        assert.strictEqual(dbMockData[rPfDailyPath].avg, 0.91, 'Daily R POWER_FACTOR avg should be 0.91');
 
         // Electricity consumption = delta = 250 Wh
         // Daily machine total should reflect electricity_usage increment and accumulators increments
