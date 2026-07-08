@@ -384,6 +384,69 @@ async function runTests() {
         process.exit(1);
     }
 
+    // Test 4: processDigitalValues with series signal overlap and new inputs structure
+    try {
+        console.log('Running test 4: processDigitalValues with series overlap configuration...');
+
+        // Mock nested inputs configuration matching the live database
+        const mockInputs = {
+            X1: {
+                label: "Injection",
+                series: "X2"
+            },
+            X2: {
+                label: "Unit Forward"
+            },
+            production: "X1"
+        };
+
+        // Reset daily total for clean tracking
+        const dailyTotalPath = `users/${uid}/reports/machines/mach001/daily/2026-06-08/total`;
+        dbMockData[dailyTotalPath] = {
+            production: { '.sv': { increment: 0 } },
+            shots: { '.sv': { increment: 0 } },
+            material_usage: { '.sv': { increment: 0 } }
+        };
+
+        // Setup mock digital values where:
+        // - X1 has two pulses at: unixTime + 10, unixTime + 40
+        // - X2 has two pulses at: unixTime + 10 (overlap), unixTime + 50 (no overlap)
+        const digitalValues = {
+            X1: [
+                { high: unixTime + 10, low: unixTime + 10 },
+                { high: unixTime + 40, low: unixTime + 40 }
+            ],
+            X2: [
+                { high: unixTime + 10, low: unixTime + 10 },
+                { high: unixTime + 50, low: unixTime + 50 }
+            ]
+        };
+
+        // Ensure cycletime filter is bypassed by setting a large time difference or nulling min_cycletime
+        mockUnit.machines.mach001.min_cycletime = 0; 
+        mockUnit.targets['mach001&production'] = {
+            status: true,
+            timer: 0,
+            pulses: 0,
+            previousUnix: unixTime - 100,
+            second_timer: 0
+        };
+
+        await processDigitalValues(mockDb, uid, unit, 'machines', 'mach001', digitalValues, unixTime, mockUnit, mockInputs);
+
+        // Verification:
+        // Only the pulse at unixTime + 10 overlaps. The pulse at unixTime + 40 does not overlap with any pulse in X2.
+        // So valid shots should be 1!
+        const stats = dbMockData[dailyTotalPath];
+        assert.ok(stats, 'Daily machine stats should exist');
+        assert.deepStrictEqual(stats.shots, { '.sv': { increment: 1 } }, 'Shots should increment by 1 (only 1 overlapping pulse)');
+
+        console.log('✓ Test 4 passed.');
+    } catch (err) {
+        console.error('✗ Test 4 failed:', err);
+        process.exit(1);
+    }
+
     console.log('--- ALL TESTS PASSED SUCCESSFULLY! ---');
 }
 

@@ -1445,18 +1445,22 @@ async function processDigitalValues(database, uid, unit, type, id, digital_value
     const hourlyReportKey = await ensureHourlyReportKey(database, uid, type, id, today, unix, _unit);
     const ioTransactionPromises = [];
     
-    // Normalize inputs keys and values to uppercase for case-insensitive matching
-    const normalizedInputs = {};
+    // Find the signal mapped to 'PRODUCTION' (e.g. { "X1": "production" } or { "production": "X1" })
+    let productionSignal = null;
     if (inputs && typeof inputs === 'object') {
-        for (const [k, v] of Object.entries(inputs)) {
-            if (typeof v === 'string') {
-                normalizedInputs[k.toUpperCase()] = v.toUpperCase();
+        if (typeof inputs.production === 'string') {
+            productionSignal = inputs.production;
+        } else {
+            // Fallback to old format
+            const normalizedInputs = {};
+            for (const [k, v] of Object.entries(inputs)) {
+                if (typeof v === 'string') {
+                    normalizedInputs[k.toUpperCase()] = v.toUpperCase();
+                }
             }
+            productionSignal = Object.keys(normalizedInputs).find(key => normalizedInputs[key] === 'PRODUCTION');
         }
     }
-
-    // Find the signal mapped to 'PRODUCTION' (e.g. { "X1": "production" } -> productionSignal = "X1")
-    const productionSignal = Object.keys(normalizedInputs).find(key => normalizedInputs[key] === 'PRODUCTION');
     let productionCountIncrement = 0;
 
     for (const [signal, logs] of Object.entries(digital_values || {})) {
@@ -1465,7 +1469,17 @@ async function processDigitalValues(database, uid, unit, type, id, digital_value
 
         let countToIncrement = validLogs.length;
         const upperSignal = signal.toUpperCase();
-        if (productionSignal && upperSignal === productionSignal) {
+        if (productionSignal && upperSignal === productionSignal.toUpperCase()) {
+            // Support series signal overlapping if configured
+            const signalConfig = inputs?.[signal] || inputs?.[signal.toLowerCase()] || inputs?.[signal.toUpperCase()];
+            const seriesSignal = signalConfig?.series;
+            if (typeof seriesSignal === 'string' && digital_values) {
+                // Find matching series logs key case-insensitively
+                const seriesKey = Object.keys(digital_values).find(k => k.toUpperCase() === seriesSignal.toUpperCase());
+                if (seriesKey && Array.isArray(digital_values[seriesKey])) {
+                    countToIncrement = countOverlapEvents(validLogs, digital_values[seriesKey]);
+                }
+            }
             productionCountIncrement = countToIncrement;
         }
 
