@@ -92,11 +92,19 @@ function normalizePayload(raw) {
                     const mappedObj = {};
                     for (const [stat, value] of Object.entries(pvObj)) {
                         const standardStat = STATS_KEYS[stat] || stat;
-                        mappedObj[standardStat] = value;
+                        let val = value;
+                        if (standardParam === 'POWER_FACTOR' && typeof val === 'number' && Math.abs(val) > 1.0) {
+                            val = val / 1000;
+                        }
+                        mappedObj[standardStat] = val;
                     }
                     pData[standardParam] = mappedObj;
                 } else {
-                    pData[standardParam] = pvObj;
+                    let val = pvObj;
+                    if (standardParam === 'POWER_FACTOR' && typeof val === 'number' && Math.abs(val) > 1.0) {
+                        val = val / 1000;
+                    }
+                    pData[standardParam] = val;
                 }
             }
             pv[phase] = pData;

@@ -16,7 +16,7 @@ const minifiedPayload = {
             v: { n: 216, x: 226, g: 221, w: 222 },
             llv: { n: 375, x: 390, g: 382, w: 384 },
             f: { n: 49.8, x: 50.2, g: 50.0, w: 50.1 },
-            pf: { x: 1.0, g: 0.95, w: 0.97 },
+            pf: { x: 1000, g: 950, w: 970 },
             thd_a: { x: 3.5, g: 2.1, w: 2.8 },
             thd_v: { x: 1.8, g: 1.2, w: 1.5 },
             a: { x: 32, g: 25.5, w: 28.2 },
@@ -44,7 +44,8 @@ const standardPayload = {
     using_external_rtc: false,
     phase_values: {
         R: {
-            VOLTAGE: { min: 218, max: 222, avg: 220, now: 221 }
+            VOLTAGE: { min: 218, max: 222, avg: 220, now: 221 },
+            POWER_FACTOR: { min: 0.91, max: 0.95, avg: 0.93, now: 0.94 }
         }
     }
 };
@@ -98,11 +99,20 @@ function runTests() {
         assert.deepStrictEqual(normalized.digital_values.X1, [
             { high: 1782138123, low: 1782138124 }
         ]);
+
+        console.log('Verifying POWER_FACTOR scaling...');
+        const sumPf = normalized.phase_values.SUM.POWER_FACTOR;
+        assert.ok(sumPf, 'SUM.POWER_FACTOR should exist');
+        assert.strictEqual(sumPf.max, 1.0);
+        assert.strictEqual(sumPf.avg, 0.95);
+        assert.strictEqual(sumPf.now, 0.97);
         console.log('\nVerifying standard payload backward compatibility...');
         const unchanged = normalizePayload(standardPayload);
         assert.strictEqual(unchanged.packet_id, 101);
         assert.strictEqual(unchanged.using_external_rtc, false);
         assert.strictEqual(unchanged.phase_values.R.VOLTAGE.min, 218);
+        assert.strictEqual(unchanged.phase_values.R.POWER_FACTOR.min, 0.91);
+        assert.strictEqual(unchanged.phase_values.R.POWER_FACTOR.max, 0.95);
 
         console.log('\n✓ All payload normalization unit tests passed successfully!');
     } catch (err) {
