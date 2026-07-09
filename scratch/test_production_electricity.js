@@ -403,6 +403,41 @@ async function runTests() {
         process.exit(1);
     }
 
+    // Test 2.9: Explicit null values do not fall back to now
+    try {
+        console.log('Running test 2.9: explicit null values do not fall back to now...');
+
+        const dailyVoltagePath = `users/${uid}/reports/machines/mach001/daily/2026-06-08/phase_values/R/VOLTAGE`;
+        
+        // 1. Setup pre-existing values in database daily report
+        dbMockData[dailyVoltagePath] = {
+            min: 215,
+            max: 225,
+            avg: 220,
+            avg_sum: 220,
+            avg_count: 1
+        };
+
+        // 2. Process a packet where min is explicitly null (e.g. voltage below threshold), and now is 0
+        const phaseValues = {
+            R: {
+                VOLTAGE: { min: null, max: null, now: 0 }
+            }
+        };
+
+        await processPhaseValues(mockDb, uid, unit, 'machines', 'mach001', phaseValues, unixTime, mockUnit);
+
+        // Verification:
+        // Since min is explicitly null, the server should NOT fall back to now (0) and the pre-existing min (215) should be preserved!
+        assert.ok(dbMockData[dailyVoltagePath], 'Daily report VOLTAGE entry should exist');
+        assert.strictEqual(dbMockData[dailyVoltagePath].min, 215, 'Pre-existing min value (215) should be preserved and not replaced by fallback 0');
+
+        console.log('✓ Test 2.9 passed.');
+    } catch (err) {
+        console.error('✗ Test 2.9 failed:', err);
+        process.exit(1);
+    }
+
     // Test 3: Machine status transition to OFF on idle
     try {
         console.log('Running test 3: Machine idle timeout status transition...');

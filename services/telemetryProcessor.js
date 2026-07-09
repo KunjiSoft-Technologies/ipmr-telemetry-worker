@@ -1337,12 +1337,29 @@ async function processPhaseValues(database, uid, unit, type, id, phase_values, u
         for (const [param, pv] of Object.entries(phaseData)) {
             if (phase === "SUM" && isAccumulatorKey(param)) continue;
 
-            const incomingMin = pv?.min !== undefined && pv?.min !== null ? Number(pv.min) : (pv?.now !== undefined ? Number(pv.now) : null);
-            const incomingMax = pv?.max !== undefined && pv?.max !== null ? Number(pv.max) : (pv?.now !== undefined ? Number(pv.now) : null);
-            const incomingAvg = pv?.avg !== undefined && pv?.avg !== null ? Number(pv.avg) : (pv?.now !== undefined ? Number(pv.now) : null);
+            let incomingMin = null;
+            if (pv?.min !== undefined) {
+                incomingMin = pv.min !== null ? Number(pv.min) : null;
+            } else {
+                incomingMin = (pv?.now !== undefined && pv?.now !== null) ? Number(pv.now) : null;
+            }
+
+            let incomingMax = null;
+            if (pv?.max !== undefined) {
+                incomingMax = pv.max !== null ? Number(pv.max) : null;
+            } else {
+                incomingMax = (pv?.now !== undefined && pv?.now !== null) ? Number(pv.now) : null;
+            }
+
+            let incomingAvg = null;
+            if (pv?.avg !== undefined) {
+                incomingAvg = pv.avg !== null ? Number(pv.avg) : null;
+            } else {
+                incomingAvg = (pv?.now !== undefined && pv?.now !== null) ? Number(pv.now) : null;
+            }
 
             // 1. Process Daily Report (retain everything, auto-detect stats keys)
-            const dailyStatsKeys = (pv?.min !== undefined && pv?.min !== null || param === "POWER_FACTOR") ? ["min", "max", "avg"] : ["max", "avg"];
+            const dailyStatsKeys = (pv?.min !== undefined || param === "POWER_FACTOR") ? ["min", "max", "avg"] : ["max", "avg"];
             const hasDailyMin = dailyStatsKeys.includes("min") && incomingMin !== null && Number.isFinite(incomingMin);
             const hasDailyMax = dailyStatsKeys.includes("max") && incomingMax !== null && Number.isFinite(incomingMax);
             const hasDailyAvg = dailyStatsKeys.includes("avg") && incomingAvg !== null && Number.isFinite(incomingAvg);
