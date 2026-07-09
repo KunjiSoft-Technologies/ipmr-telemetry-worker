@@ -1349,8 +1349,8 @@ async function processPhaseValues(database, uid, unit, type, id, phase_values, u
 
             if (hasDailyMin || hasDailyMax || hasDailyAvg) {
                 const txFnDaily = (current) => {
-                    const nextVal = {};
                     if (current === null) {
+                        const nextVal = {};
                         if (hasDailyMin) nextVal.min = incomingMin;
                         if (hasDailyMax) nextVal.max = incomingMax;
                         if (hasDailyAvg) {
@@ -1360,6 +1360,7 @@ async function processPhaseValues(database, uid, unit, type, id, phase_values, u
                         }
                         return nextVal;
                     }
+                    const nextVal = { ...current };
                     if (hasDailyMin) nextVal.min = Math.min(current.min ?? incomingMin, incomingMin);
                     if (hasDailyMax) nextVal.max = Math.max(current.max ?? incomingMax, incomingMax);
                     if (hasDailyAvg) {
@@ -1409,8 +1410,8 @@ async function processPhaseValues(database, uid, unit, type, id, phase_values, u
 
                 if (hasHourlyMin || hasHourlyMax || hasHourlyAvg) {
                     const txFnHouly = (current) => {
-                        const nextVal = {};
                         if (current === null) {
+                            const nextVal = {};
                             if (hasHourlyMin) nextVal.min = incomingMin;
                             if (hasHourlyMax) nextVal.max = incomingMax;
                             if (hasHourlyAvg) {
@@ -1420,6 +1421,7 @@ async function processPhaseValues(database, uid, unit, type, id, phase_values, u
                             }
                             return nextVal;
                         }
+                        const nextVal = { ...current };
                         if (hasHourlyMin) nextVal.min = Math.min(current.min ?? incomingMin, incomingMin);
                         if (hasHourlyMax) nextVal.max = Math.max(current.max ?? incomingMax, incomingMax);
                         if (hasHourlyAvg) {

@@ -367,6 +367,42 @@ async function runTests() {
         process.exit(1);
     }
 
+    // Test 2.8: Daily/hourly reports preserve existing properties when incoming values are null/missing
+    try {
+        console.log('Running test 2.8: daily/hourly reports preserve properties when min is missing...');
+
+        const dailyPfPath = `users/${uid}/reports/machines/mach001/daily/2026-06-08/phase_values/SUM/POWER_FACTOR`;
+        
+        // 1. Setup pre-existing values in database daily report
+        dbMockData[dailyPfPath] = {
+            min: 0.85,
+            max: 0.95,
+            avg: 0.90,
+            avg_sum: 0.90,
+            avg_count: 1
+        };
+
+        // 2. Process a packet with only max and avg, but min and now are missing/null
+        const phaseValues = {
+            SUM: {
+                POWER_FACTOR: { max: 0.96, avg: 0.92 }
+            }
+        };
+
+        await processPhaseValues(mockDb, uid, unit, 'machines', 'mach001', phaseValues, unixTime, mockUnit);
+
+        // Verification:
+        // The existing min of 0.85 should be preserved and not deleted!
+        assert.ok(dbMockData[dailyPfPath], 'Daily report POWER_FACTOR entry should still exist');
+        assert.strictEqual(dbMockData[dailyPfPath].min, 0.85, 'Pre-existing min value should be preserved');
+        assert.strictEqual(dbMockData[dailyPfPath].max, 0.96, 'Max value should be updated to 0.96');
+
+        console.log('✓ Test 2.8 passed.');
+    } catch (err) {
+        console.error('✗ Test 2.8 failed:', err);
+        process.exit(1);
+    }
+
     // Test 3: Machine status transition to OFF on idle
     try {
         console.log('Running test 3: Machine idle timeout status transition...');
