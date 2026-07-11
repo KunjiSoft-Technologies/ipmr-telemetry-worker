@@ -438,6 +438,61 @@ async function runTests() {
         process.exit(1);
     }
 
+    // Test 2.10: Phase values are skipped when voltage is below 80V threshold, but accumulators still work
+    try {
+        console.log('Running test 2.10: skipping daily/hourly report updates below 80V...');
+
+        const dailyVoltagePath = `users/${uid}/reports/machines/mach001/daily/2026-06-08/phase_values/R/VOLTAGE`;
+        const accumPath = `users/${uid}/reports/machines/mach001/accumulators/SUM_WH_Total`;
+        const dailyTotalPath = `users/${uid}/reports/machines/mach001/daily/2026-06-08/total`;
+
+        // 1. Setup pre-existing values in database report
+        dbMockData[dailyVoltagePath] = {
+            min: 215,
+            max: 225,
+            avg: 220,
+            avg_sum: 220,
+            avg_count: 1
+        };
+        dbMockData[accumPath] = 1340;
+        dbMockData[`users/${uid}/reports/machines/mach001/accumulators_state/SUM_WH_Total`] = {
+            raw: 1340,
+            lifetime: 1340
+        };
+        dbMockData[dailyTotalPath] = {
+            electricity_usage: { '.sv': { increment: 0 } },
+            'accumulators/SUM_WH_Total': { '.sv': { increment: 0 } }
+        };
+
+        // 2. Process a packet where voltage is below 80V (e.g. now = 50V), but there is energy accumulator increment (delta 10 Wh)
+        const phaseValues = {
+            R: {
+                VOLTAGE: { min: 50, max: 50, now: 50 }
+            },
+            SUM: {
+                SUM_WH_Total: { now: 1350 }
+            }
+        };
+
+        mockUnit.previousUnix = unixTime - 30; // 30 seconds ago
+
+        await processPhaseValues(mockDb, uid, unit, 'machines', 'mach001', phaseValues, unixTime, mockUnit);
+
+        // Verification:
+        // A. Accumulator logic SHOULD run (since it's not daily/hourly min/max report stats)
+        assert.strictEqual(dbMockData[accumPath], 1350, 'Accumulator SUM_WH_Total should be updated to 1350');
+        assert.strictEqual(dbMockData[dailyTotalPath].electricity_usage['.sv'].increment, 0.01, 'Electricity usage should still increment');
+
+        // B. Daily voltage stats should NOT be updated because R.VOLTAGE was 50V (which is below 80V threshold)
+        // If it had been processed, it would have updated min to 50, but since skipped, min remains 215!
+        assert.strictEqual(dbMockData[dailyVoltagePath].min, 215, 'Voltage daily stats should NOT update since voltage is below threshold');
+
+        console.log('✓ Test 2.10 passed.');
+    } catch (err) {
+        console.error('✗ Test 2.10 failed:', err);
+        process.exit(1);
+    }
+
     // Test 3: Machine status transition to OFF on idle
     try {
         console.log('Running test 3: Machine idle timeout status transition...');

@@ -1193,12 +1193,36 @@ async function ensureHourlyReportKey(database, uid, type, id, today, unix, _unit
     return key;
 }
 
+function checkVoltageBelowThreshold(phase_values, threshold = 80) {
+    if (!phase_values) return false;
+    const phases = ["R", "S", "T", "SUM"];
+    for (const phase of phases) {
+        const phaseData = phase_values[phase];
+        if (!phaseData) continue;
+        const voltageData = phaseData.VOLTAGE || phaseData.L_L_VOLTAGE;
+        if (!voltageData) continue;
+        
+        const fields = ["now", "min", "max", "avg"];
+        for (const field of fields) {
+            const val = voltageData[field];
+            if (val !== undefined && val !== null && Number.isFinite(Number(val))) {
+                if (Number(val) < threshold) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
 async function processPhaseValues(database, uid, unit, type, id, phase_values, unix, _unit) {
     const today = getToday(uid, unix, _unit);
     const hour = whatHour(uid, unix, _unit);
     const hourlyReportKey = await ensureHourlyReportKey(database, uid, type, id, today, unix, _unit);
     const phases = ["R", "S", "T", "SUM"];
     const transactionPromises = [];
+
+    const isVoltageBelowThreshold = checkVoltageBelowThreshold(phase_values);
 
     for (const phase of phases) {
         const phaseData = phase_values?.[phase];
@@ -1332,6 +1356,10 @@ async function processPhaseValues(database, uid, unit, type, id, phase_values, u
                     await countElectricity(database, uid, unit, type, id, electricityIncrement, safeTimeDiff, unix, _unit, accumulatorIncrements);
                 }
             }
+        }
+
+        if (isVoltageBelowThreshold) {
+            continue;
         }
 
         for (const [param, pv] of Object.entries(phaseData)) {
@@ -1579,5 +1607,6 @@ module.exports = {
     verifySequence,
     trackTemperature,
     processPhaseValues,
-    processDigitalValues
+    processDigitalValues,
+    checkVoltageBelowThreshold
 };

@@ -10,7 +10,8 @@ const {
     verifySequence,
     trackTemperature,
     processPhaseValues,
-    processDigitalValues
+    processDigitalValues,
+    checkVoltageBelowThreshold
 } = require('./services/telemetryProcessor');
 const { processAlerts } = require('./services/alertManager');
 const { normalizePayload } = require('./utils/payloadNormalizer');
@@ -191,7 +192,8 @@ async function handleMessage(message) {
         }
 
         // 9. Evaluate alerts
-        if (connection && connection.type && connection.id) {
+        const isVoltageBelowThreshold = checkVoltageBelowThreshold(payload.phase_values);
+        if (connection && connection.type && connection.id && !isVoltageBelowThreshold) {
             await processAlerts(uid, unit, connection.type, connection.id, unix, payload, redis, database, _unit);
         }
 
@@ -206,6 +208,7 @@ async function handleMessage(message) {
             realtime,
             values,
             now_values,
+            phase_values: payload.phase_values || {},
             unix,
             temperature,
             active_alerts
