@@ -177,18 +177,18 @@ async function runTests() {
         assert.strictEqual(dbMockData[accumPath], 1250, 'Accumulator SUM_WH_Total should be updated to 1250');
         assert.strictEqual(dbMockData[vahAccumPath], 2500, 'Accumulator SUM_VAH should be updated to 2500');
 
-        // Verify POWER_FACTOR daily report min/max/avg for SUM and R phase
+        // Verify POWER_FACTOR daily report lag_min/lead_min/avg for SUM and R phase
         const sumPfDailyPath = `users/${uid}/reports/machines/mach001/daily/2026-06-08/phase_values/SUM/POWER_FACTOR`;
         const rPfDailyPath = `users/${uid}/reports/machines/mach001/daily/2026-06-08/phase_values/R/POWER_FACTOR`;
 
         assert.ok(dbMockData[sumPfDailyPath], 'Daily SUM POWER_FACTOR should exist');
-        assert.strictEqual(dbMockData[sumPfDailyPath].min, 0.92, 'Daily SUM POWER_FACTOR min should fall back to now');
-        assert.strictEqual(dbMockData[sumPfDailyPath].max, 0.95, 'Daily SUM POWER_FACTOR max should be 0.95');
+        assert.strictEqual(dbMockData[sumPfDailyPath].lag_min, 0.90, 'Daily SUM POWER_FACTOR lag_min should be 0.90');
+        assert.strictEqual(dbMockData[sumPfDailyPath].lead_min, 1, 'Daily SUM POWER_FACTOR lead_min should default to 1');
         assert.strictEqual(dbMockData[sumPfDailyPath].avg, 0.90, 'Daily SUM POWER_FACTOR avg should be 0.90');
 
         assert.ok(dbMockData[rPfDailyPath], 'Daily R POWER_FACTOR should exist');
-        assert.strictEqual(dbMockData[rPfDailyPath].min, 0.93, 'Daily R POWER_FACTOR min should fall back to now');
-        assert.strictEqual(dbMockData[rPfDailyPath].max, 0.96, 'Daily R POWER_FACTOR max should be 0.96');
+        assert.strictEqual(dbMockData[rPfDailyPath].lag_min, 0.91, 'Daily R POWER_FACTOR lag_min should be 0.91');
+        assert.strictEqual(dbMockData[rPfDailyPath].lead_min, 1, 'Daily R POWER_FACTOR lead_min should default to 1');
         assert.strictEqual(dbMockData[rPfDailyPath].avg, 0.91, 'Daily R POWER_FACTOR avg should be 0.91');
 
         // Electricity consumption = delta = 250 Wh
@@ -371,31 +371,31 @@ async function runTests() {
     try {
         console.log('Running test 2.8: daily/hourly reports preserve properties when min is missing...');
 
-        const dailyPfPath = `users/${uid}/reports/machines/mach001/daily/2026-06-08/phase_values/SUM/POWER_FACTOR`;
+        const dailyVoltagePath = `users/${uid}/reports/machines/mach001/daily/2026-06-08/phase_values/SUM/VOLTAGE`;
         
         // 1. Setup pre-existing values in database daily report
-        dbMockData[dailyPfPath] = {
-            min: 0.85,
-            max: 0.95,
-            avg: 0.90,
-            avg_sum: 0.90,
+        dbMockData[dailyVoltagePath] = {
+            min: 215,
+            max: 225,
+            avg: 220,
+            avg_sum: 220,
             avg_count: 1
         };
 
         // 2. Process a packet with only max and avg, but min and now are missing/null
         const phaseValues = {
             SUM: {
-                POWER_FACTOR: { max: 0.96, avg: 0.92 }
+                VOLTAGE: { max: 230, avg: 222 }
             }
         };
 
         await processPhaseValues(mockDb, uid, unit, 'machines', 'mach001', phaseValues, unixTime, mockUnit);
 
         // Verification:
-        // The existing min of 0.85 should be preserved and not deleted!
-        assert.ok(dbMockData[dailyPfPath], 'Daily report POWER_FACTOR entry should still exist');
-        assert.strictEqual(dbMockData[dailyPfPath].min, 0.85, 'Pre-existing min value should be preserved');
-        assert.strictEqual(dbMockData[dailyPfPath].max, 0.96, 'Max value should be updated to 0.96');
+        // The existing min of 215 should be preserved and not deleted!
+        assert.ok(dbMockData[dailyVoltagePath], 'Daily report VOLTAGE entry should still exist');
+        assert.strictEqual(dbMockData[dailyVoltagePath].min, 215, 'Pre-existing min value should be preserved');
+        assert.strictEqual(dbMockData[dailyVoltagePath].max, 230, 'Max value should be updated to 230');
 
         console.log('✓ Test 2.8 passed.');
     } catch (err) {
@@ -490,6 +490,50 @@ async function runTests() {
         console.log('✓ Test 2.10 passed.');
     } catch (err) {
         console.error('✗ Test 2.10 failed:', err);
+        process.exit(1);
+    }
+
+    // Test 2.11: POWER_FACTOR lag_min / lead_min comparisons...
+    try {
+        console.log('Running test 2.11: POWER_FACTOR lag_min / lead_min comparisons...');
+
+        const dailyPfPath = `users/${uid}/reports/machines/mach001/daily/2026-06-08/phase_values/SUM/POWER_FACTOR`;
+
+        // 1. Setup pre-existing values
+        dbMockData[dailyPfPath] = {
+            lag_min: 0.90,
+            lead_min: -0.95,
+            avg: -0.92,
+            avg_sum: -0.92,
+            avg_count: 1
+        };
+
+        // 2. Process a packet with:
+        // - min: -0.10 (should update lead_min to -0.10 since Math.abs(-0.10) < Math.abs(-0.95))
+        // - max: -0.98 (should not update lead_min because Math.abs(-0.98) > Math.abs(-0.10))
+        // - now: 0.85 (should update lag_min to 0.85 since Math.abs(0.85) < Math.abs(0.90))
+        const phaseValues = {
+            SUM: {
+                POWER_FACTOR: { min: -0.10, max: -0.98, now: 0.85 }
+            }
+        };
+
+        // Bypassing voltage threshold checks by sending R phase voltage at 220V
+        phaseValues.R = {
+            VOLTAGE: { now: 220 }
+        };
+
+        await processPhaseValues(mockDb, uid, unit, 'machines', 'mach001', phaseValues, unixTime, mockUnit);
+
+        // Verification:
+        // The daily report should update lag_min to 0.85 and lead_min to -0.10!
+        assert.ok(dbMockData[dailyPfPath], 'Daily report POWER_FACTOR entry should exist');
+        assert.strictEqual(dbMockData[dailyPfPath].lag_min, 0.85, 'POWER_FACTOR lag_min should update to the worse absolute value (0.85)');
+        assert.strictEqual(dbMockData[dailyPfPath].lead_min, -0.10, 'POWER_FACTOR lead_min should update to the worse absolute value (-0.10)');
+
+        console.log('✓ Test 2.11 passed.');
+    } catch (err) {
+        console.error('✗ Test 2.11 failed:', err);
         process.exit(1);
     }
 

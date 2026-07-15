@@ -1386,18 +1386,53 @@ async function processPhaseValues(database, uid, unit, type, id, phase_values, u
                 incomingAvg = (pv?.now !== undefined && pv?.now !== null) ? Number(pv.now) : null;
             }
 
+            let incomingLagMin = null;
+            let incomingLeadMin = null;
+            if (param === "POWER_FACTOR") {
+                const pfValues = [];
+                if (pv?.min !== undefined && pv?.min !== null) pfValues.push(Number(pv.min));
+                if (pv?.max !== undefined && pv?.max !== null) pfValues.push(Number(pv.max));
+                if (pv?.now !== undefined && pv?.now !== null) pfValues.push(Number(pv.now));
+                if (pv?.avg !== undefined && pv?.avg !== null) pfValues.push(Number(pv.avg));
+
+                for (const v of pfValues) {
+                    if (Number.isFinite(v)) {
+                        if (v >= 0) {
+                            if (incomingLagMin === null || Math.abs(v) < Math.abs(incomingLagMin)) {
+                                incomingLagMin = v;
+                            }
+                        } else {
+                            if (incomingLeadMin === null || Math.abs(v) < Math.abs(incomingLeadMin)) {
+                                incomingLeadMin = v;
+                            }
+                        }
+                    }
+                }
+            }
+
             // 1. Process Daily Report (retain everything, auto-detect stats keys)
-            const dailyStatsKeys = (pv?.min !== undefined || param === "POWER_FACTOR") ? ["min", "max", "avg"] : ["max", "avg"];
+            const dailyStatsKeys = param === "POWER_FACTOR"
+                ? ["lag_min", "lead_min", "avg"]
+                : (pv?.min !== undefined ? ["min", "max", "avg"] : ["max", "avg"]);
+
             const hasDailyMin = dailyStatsKeys.includes("min") && incomingMin !== null && Number.isFinite(incomingMin);
             const hasDailyMax = dailyStatsKeys.includes("max") && incomingMax !== null && Number.isFinite(incomingMax);
             const hasDailyAvg = dailyStatsKeys.includes("avg") && incomingAvg !== null && Number.isFinite(incomingAvg);
 
-            if (hasDailyMin || hasDailyMax || hasDailyAvg) {
+            const hasDailyLagMin = dailyStatsKeys.includes("lag_min") && incomingLagMin !== null && Number.isFinite(incomingLagMin);
+            const hasDailyLeadMin = dailyStatsKeys.includes("lead_min") && incomingLeadMin !== null && Number.isFinite(incomingLeadMin);
+
+            if (hasDailyMin || hasDailyMax || hasDailyAvg || hasDailyLagMin || hasDailyLeadMin) {
                 const txFnDaily = (current) => {
                     if (current === null) {
                         const nextVal = {};
-                        if (hasDailyMin) nextVal.min = incomingMin;
-                        if (hasDailyMax) nextVal.max = incomingMax;
+                        if (param === "POWER_FACTOR") {
+                            nextVal.lag_min = hasDailyLagMin ? incomingLagMin : 1;
+                            nextVal.lead_min = hasDailyLeadMin ? incomingLeadMin : 1;
+                        } else {
+                            if (hasDailyMin) nextVal.min = incomingMin;
+                            if (hasDailyMax) nextVal.max = incomingMax;
+                        }
                         if (hasDailyAvg) {
                             nextVal.avg = incomingAvg;
                             nextVal.avg_sum = incomingAvg;
@@ -1406,8 +1441,20 @@ async function processPhaseValues(database, uid, unit, type, id, phase_values, u
                         return nextVal;
                     }
                     const nextVal = { ...current };
-                    if (hasDailyMin) nextVal.min = Math.min(current.min ?? incomingMin, incomingMin);
-                    if (hasDailyMax) nextVal.max = Math.max(current.max ?? incomingMax, incomingMax);
+                    if (param === "POWER_FACTOR") {
+                        if (nextVal.lag_min === undefined) nextVal.lag_min = 1;
+                        if (nextVal.lead_min === undefined) nextVal.lead_min = 1;
+
+                        if (hasDailyLagMin) {
+                            nextVal.lag_min = Math.abs(nextVal.lag_min) <= Math.abs(incomingLagMin) ? nextVal.lag_min : incomingLagMin;
+                        }
+                        if (hasDailyLeadMin) {
+                            nextVal.lead_min = Math.abs(nextVal.lead_min) <= Math.abs(incomingLeadMin) ? nextVal.lead_min : incomingLeadMin;
+                        }
+                    } else {
+                        if (hasDailyMin) nextVal.min = Math.min(current.min ?? incomingMin, incomingMin);
+                        if (hasDailyMax) nextVal.max = Math.max(current.max ?? incomingMax, incomingMax);
+                    }
                     if (hasDailyAvg) {
                         const newAvgSum = (current.avg_sum ?? 0) + incomingAvg;
                         const newAvgCount = (current.avg_count ?? 0) + 1;
@@ -1430,13 +1477,13 @@ async function processPhaseValues(database, uid, unit, type, id, phase_values, u
                     "L_L_VOLTAGE": ["min", "max", "avg"],
                     "AMPERE": ["max", "avg"],
                     "POWER": ["max", "avg"],
-                    "POWER_FACTOR": ["min", "max", "avg"]
+                    "POWER_FACTOR": ["lag_min", "lead_min", "avg"]
                 },
                 SUM: {
                     "VOLTAGE": ["min", "max", "avg"],
                     "L_L_VOLTAGE": ["min", "max", "avg"],
                     "FREQUENCY": ["min", "max", "avg"],
-                    "POWER_FACTOR": ["min", "max", "avg"],
+                    "POWER_FACTOR": ["lag_min", "lead_min", "avg"],
                     "CURRENT_THD": ["max", "avg"],
                     "VOLTAGE_THD": ["max", "avg"],
                     "AMPERE": ["max", "avg"],
@@ -1453,12 +1500,20 @@ async function processPhaseValues(database, uid, unit, type, id, phase_values, u
                 const hasHourlyMax = allowedHourlyStats.includes("max") && incomingMax !== null && Number.isFinite(incomingMax);
                 const hasHourlyAvg = allowedHourlyStats.includes("avg") && incomingAvg !== null && Number.isFinite(incomingAvg);
 
-                if (hasHourlyMin || hasHourlyMax || hasHourlyAvg) {
+                const hasHourlyLagMin = allowedHourlyStats.includes("lag_min") && incomingLagMin !== null && Number.isFinite(incomingLagMin);
+                const hasHourlyLeadMin = allowedHourlyStats.includes("lead_min") && incomingLeadMin !== null && Number.isFinite(incomingLeadMin);
+
+                if (hasHourlyMin || hasHourlyMax || hasHourlyAvg || hasHourlyLagMin || hasHourlyLeadMin) {
                     const txFnHouly = (current) => {
                         if (current === null) {
                             const nextVal = {};
-                            if (hasHourlyMin) nextVal.min = incomingMin;
-                            if (hasHourlyMax) nextVal.max = incomingMax;
+                            if (param === "POWER_FACTOR") {
+                                nextVal.lag_min = hasHourlyLagMin ? incomingLagMin : 1;
+                                nextVal.lead_min = hasHourlyLeadMin ? incomingLeadMin : 1;
+                            } else {
+                                if (hasHourlyMin) nextVal.min = incomingMin;
+                                if (hasHourlyMax) nextVal.max = incomingMax;
+                            }
                             if (hasHourlyAvg) {
                                 nextVal.avg = incomingAvg;
                                 nextVal.avg_sum = incomingAvg;
@@ -1467,8 +1522,20 @@ async function processPhaseValues(database, uid, unit, type, id, phase_values, u
                             return nextVal;
                         }
                         const nextVal = { ...current };
-                        if (hasHourlyMin) nextVal.min = Math.min(current.min ?? incomingMin, incomingMin);
-                        if (hasHourlyMax) nextVal.max = Math.max(current.max ?? incomingMax, incomingMax);
+                        if (param === "POWER_FACTOR") {
+                            if (nextVal.lag_min === undefined) nextVal.lag_min = 1;
+                            if (nextVal.lead_min === undefined) nextVal.lead_min = 1;
+
+                            if (hasHourlyLagMin) {
+                                nextVal.lag_min = Math.abs(nextVal.lag_min) <= Math.abs(incomingLagMin) ? nextVal.lag_min : incomingLagMin;
+                            }
+                            if (hasHourlyLeadMin) {
+                                nextVal.lead_min = Math.abs(nextVal.lead_min) <= Math.abs(incomingLeadMin) ? nextVal.lead_min : incomingLeadMin;
+                            }
+                        } else {
+                            if (hasHourlyMin) nextVal.min = Math.min(current.min ?? incomingMin, incomingMin);
+                            if (hasHourlyMax) nextVal.max = Math.max(current.max ?? incomingMax, incomingMax);
+                        }
                         if (hasHourlyAvg) {
                             const newAvgSum = (current.avg_sum ?? 0) + incomingAvg;
                             const newAvgCount = (current.avg_count ?? 0) + 1;
@@ -1480,7 +1547,8 @@ async function processPhaseValues(database, uid, unit, type, id, phase_values, u
                     };
                     transactionPromises.push(
                         database.ref(`users/${uid}/reports/${type}/${id}/hourly/${today}/${hourlyReportKey}/phase_values/${phase}/${param}`).transaction(txFnHouly)
-                    );                }
+                    );
+                }
             }
         }
     }
