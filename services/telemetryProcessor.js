@@ -211,7 +211,7 @@ async function turnOn(database, name, uid, unit, isEQ, at, unix, _unit) {
 /**
  * countProduction implementation.
  */
-async function countProduction(database, uid, unit, name, value, time, unix, _unit, productionLogs) {
+async function countProduction(database, uid, unit, name, value, time, unix, _unit) {
     value = value || 0;
     value = Number(value.toFixed(0));
     const machineObj = _unit.machines[name];
@@ -438,25 +438,7 @@ async function countProduction(database, uid, unit, name, value, time, unix, _un
         downtimeFunc()
     ];
 
-    if (value > 0) {
-        const tz = _unit?.info?.timezone || "Asia/Karachi";
-        let timestampsToLog = [];
-        if (Array.isArray(productionLogs) && productionLogs.length > 0) {
-            timestampsToLog = productionLogs;
-        } else {
-            for (let i = 0; i < value; i++) {
-                timestampsToLog.push(unix);
-            }
-        }
-
-        for (const t of timestampsToLog) {
-            const humanTime = moment.unix(t).tz(tz).format("YYYY-MM-DD HH:mm:ss");
-            promises.push(
-                database.ref(`users/${uid}/shots/${today}/machines/${name}/each`).push(humanTime)
-            );
-        }
-
-        promises.push(database.ref(`users/${uid}/shots/${today}/machines/${name}/total`).set(admin.database.ServerValue.increment(value)));
+    if (value) {
         promises.push(database.ref(`users/${uid}/machines/${name}/last_shot`).set(moment().unix()));
     }
     if (details.isUniversal) {
@@ -1683,18 +1665,8 @@ async function processDigitalValues(database, uid, unit, type, id, digital_value
 
         target.previousUnix = unix;
 
-        let productionLogs = [];
-        if (productionSignal) {
-            const prodLogs = digital_values?.[productionSignal];
-            if (Array.isArray(prodLogs)) {
-                productionLogs = prodLogs
-                    .filter((entry) => toRange(entry) !== null)
-                    .map((entry) => entry.high);
-            }
-        }
-
         // Run production increment updates
-        await countProduction(database, uid, unit, id, value, safeTimeDiff, unix, _unit, productionLogs);
+        await countProduction(database, uid, unit, id, value, safeTimeDiff, unix, _unit);
     }
 }
 

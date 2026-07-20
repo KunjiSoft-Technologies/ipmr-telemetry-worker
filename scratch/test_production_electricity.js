@@ -631,63 +631,6 @@ async function runTests() {
         process.exit(1);
     }
 
-    // Test 5: Detailed shot logging and daily total tracking
-    try {
-        console.log('Running test 5: detailed shot logging and total tracking...');
-
-        // Clear mock data
-        for (const key of Object.keys(dbMockData)) {
-            delete dbMockData[key];
-        }
-
-        const digitalValues = {
-            X1: [
-                { high: unixTime + 10, low: unixTime + 10 },
-                { high: unixTime + 40, low: unixTime + 40 },
-                { high: unixTime + 70, low: unixTime + 70 }
-            ]
-        };
-
-        const mockInputs = { production: 'X1' };
-
-        mockUnit.machines.mach001.min_cycletime = 0;
-        mockUnit.targets['mach001&production'] = {
-            status: true,
-            timer: 0,
-            pulses: 0,
-            previousUnix: unixTime - 100,
-            second_timer: 0
-        };
-
-        await processDigitalValues(mockDb, uid, unit, 'machines', 'mach001', digitalValues, unixTime, mockUnit, mockInputs);
-
-        // Verification:
-        // A. There should be pushed shot entries under users/${uid}/shots/2026-06-08/machines/mach001/each
-        const eachPathPrefix = `users/${uid}/shots/2026-06-08/machines/mach001/each`;
-        const eachKeys = Object.keys(dbMockData).filter(k => k.startsWith(eachPathPrefix));
-        assert.strictEqual(eachKeys.length, 3, 'Should have exactly three pushed shot logs');
-        
-        const moment = require('moment-timezone');
-        const tz = mockUnit?.info?.timezone || "Asia/Karachi";
-        const expectedTime1 = moment.unix(unixTime + 10).tz(tz).format("YYYY-MM-DD HH:mm:ss");
-        const expectedTime2 = moment.unix(unixTime + 40).tz(tz).format("YYYY-MM-DD HH:mm:ss");
-        const expectedTime3 = moment.unix(unixTime + 70).tz(tz).format("YYYY-MM-DD HH:mm:ss");
-
-        const pushedValues = eachKeys.map(k => dbMockData[k]);
-        assert.ok(pushedValues.includes(expectedTime1), `Should contain timestamp 1: ${expectedTime1}`);
-        assert.ok(pushedValues.includes(expectedTime2), `Should contain timestamp 2: ${expectedTime2}`);
-        assert.ok(pushedValues.includes(expectedTime3), `Should contain timestamp 3: ${expectedTime3}`);
-
-        // B. The total shots for today should be updated under users/${uid}/shots/2026-06-08/machines/mach001/total
-        const totalPath = `users/${uid}/shots/2026-06-08/machines/mach001/total`;
-        assert.deepStrictEqual(dbMockData[totalPath], { '.sv': { increment: 3 } }, 'Machine total shots should increment by 3');
-
-        console.log('✓ Test 5 passed.');
-    } catch (err) {
-        console.error('✗ Test 5 failed:', err);
-        process.exit(1);
-    }
-
     console.log('--- ALL TESTS PASSED SUCCESSFULLY! ---');
 }
 
