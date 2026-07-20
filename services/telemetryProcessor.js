@@ -211,11 +211,26 @@ async function turnOn(database, name, uid, unit, isEQ, at, unix, _unit) {
 /**
  * countProduction implementation.
  */
-async function countProduction(database, uid, unit, name, value, time, unix, _unit) {
+async function countProduction(database, uid, unit, name, value, time, unix, _unit, cycleTimes) {
     value = value || 0;
     value = Number(value.toFixed(0));
     const machineObj = _unit.machines[name];
     if (!machineObj || machineObj.title === undefined) return _unit;
+
+    let totalCycleTime = 0;
+    let countOfNonZeroCycleTimes = 0;
+    const newCycleTimes = [];
+
+    if (Array.isArray(cycleTimes)) {
+        for (const cycle of cycleTimes) {
+            const num = Number(cycle);
+            if (Number.isFinite(num) && num !== 0) {
+                totalCycleTime += num;
+                countOfNonZeroCycleTimes += 1;
+                newCycleTimes.push(num);
+            }
+        }
+    }
 
     const pulse_width = machineObj.pulse_width;
     const production_meters = pulse_width ? value * pulse_width : null;
@@ -444,6 +459,24 @@ async function countProduction(database, uid, unit, name, value, time, unix, _un
     if (details.isUniversal) {
         promises.push(database.ref(`users/${uid}/reports/UNIVERSAL_MOLDS/${today}/${name}`).set(true));
     }
+
+    if (countOfNonZeroCycleTimes > 0) {
+        const moldCycleTimeRefPath = `users/${uid}/reports/machines/${name}/daily/${today}/molds/${mold_name}/stats/cycletime`;
+        promises.push(database.ref(moldCycleTimeRefPath).update({
+            total: admin.database.ServerValue.increment(totalCycleTime),
+            count: admin.database.ServerValue.increment(countOfNonZeroCycleTimes)
+        }));
+
+        promises.push(database.ref(moldCycleTimeRefPath + '/last_10').transaction((current) => {
+            let list = Array.isArray(current) ? current : [];
+            list.push(...newCycleTimes);
+            if (list.length > 10) {
+                list = list.slice(list.length - 10);
+            }
+            return list;
+        }));
+    }
+
     await Promise.all(promises);
 
     // Hourly report logic
@@ -504,11 +537,25 @@ async function countProduction(database, uid, unit, name, value, time, unix, _un
         offtime: admin.database.ServerValue.increment(offtime),
     };
 
+    const newHourlyStats = { ...hourlyStats };
+    if (countOfNonZeroCycleTimes > 0) {
+        newHourlyStats.cycletime = {
+            total: totalCycleTime,
+            count: countOfNonZeroCycleTimes
+        };
+    }
+
     if (_unit.hourlyReportData[name] !== null && hourlyReportKey !== undefined) {
         const hasNotChanged = isSameObject(hourDetails, hourlyReportValues);
         if (hourlyReportValues.from <= seconds && seconds <= hourlyReportValues.time) {
             if (hasNotChanged) {
                 await database.ref(`users/${uid}/reports/machines/${name}/hourly/${today}/${hourlyReportKey}`).update(hourlyStats);
+                if (countOfNonZeroCycleTimes > 0) {
+                    await database.ref(`users/${uid}/reports/machines/${name}/hourly/${today}/${hourlyReportKey}/cycletime`).update({
+                        total: admin.database.ServerValue.increment(totalCycleTime),
+                        count: admin.database.ServerValue.increment(countOfNonZeroCycleTimes)
+                    });
+                }
             } else {
                 await database.ref(`users/${uid}/reports/machines/${name}/hourly/${today}/${hourlyReportKey}`).update({ time: seconds });
                 hourlyReportKey = Number(hourlyReportKey) + 1;
@@ -517,7 +564,7 @@ async function countProduction(database, uid, unit, name, value, time, unix, _un
                     values: { from: seconds, time: hourlyReportValues.time, ...hourDetails }
                 };
                 await database.ref(`users/${uid}/reports/machines/${name}/hourly/${today}/${hourlyReportKey}`).set({
-                    ...hourlyStats,
+                    ...newHourlyStats,
                     from: seconds,
                     time: hourlyReportValues.time,
                     ...hourDetails
@@ -535,7 +582,7 @@ async function countProduction(database, uid, unit, name, value, time, unix, _un
                 values: { from: seconds, time: nextTime, ...hourDetails }
             };
             await database.ref(`users/${uid}/reports/machines/${name}/hourly/${today}/${hourlyReportKey}`).set({
-                ...hourlyStats,
+                ...newHourlyStats,
                 from: seconds,
                 time: nextTime,
                 ...hourDetails
@@ -551,7 +598,7 @@ async function countProduction(database, uid, unit, name, value, time, unix, _un
             values: { from: seconds, time: nextTime, ...hourDetails }
         };
         await database.ref(`users/${uid}/reports/machines/${name}/hourly/${today}/${key}`).set({
-            ...hourlyStats,
+            ...newHourlyStats,
             from: seconds,
             time: nextTime,
             ...hourDetails
@@ -1665,8 +1712,18 @@ async function processDigitalValues(database, uid, unit, type, id, digital_value
 
         target.previousUnix = unix;
 
+        let cycleTimes = [];
+        if (productionSignal) {
+            const prodLogs = digital_values?.[productionSignal];
+            if (Array.isArray(prodLogs)) {
+                cycleTimes = prodLogs
+                    .filter((entry) => toRange(entry) !== null)
+                    .map((entry) => entry.high);
+            }
+        }
+
         // Run production increment updates
-        await countProduction(database, uid, unit, id, value, safeTimeDiff, unix, _unit);
+        await countProduction(database, uid, unit, id, value, safeTimeDiff, unix, _unit, cycleTimes);
     }
 }
 

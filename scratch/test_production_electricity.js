@@ -631,6 +631,64 @@ async function runTests() {
         process.exit(1);
     }
 
+    // Test 6: Precise cycletime daily/hourly averages and last 10 log
+    try {
+        console.log('Running test 6: exact cycle time calculations and tracking...');
+
+        // Clear mock data
+        for (const key of Object.keys(dbMockData)) {
+            delete dbMockData[key];
+        }
+
+        // Setup mock digital values with cycle times: 16.256, 0 (first shot skipped), and 16.384
+        const digitalValues = {
+            X1: [
+                { high: 16.256, low: 16.256 },
+                { high: 0, low: 0 },
+                { high: 16.384, low: 16.384 }
+            ]
+        };
+
+        const mockInputs = { production: 'X1' };
+
+        mockUnit.machines.mach001.min_cycletime = 0;
+        mockUnit.targets['mach001&production'] = {
+            status: true,
+            timer: 0,
+            pulses: 0,
+            previousUnix: unixTime - 100,
+            second_timer: 0
+        };
+
+        // Clear hourly report cache to force initialization
+        delete mockUnit.hourlyReportData;
+
+        await processDigitalValues(mockDb, uid, unit, 'machines', 'mach001', digitalValues, unixTime, mockUnit, mockInputs);
+
+        // Verification:
+        // A. Daily report mold cycletime path: users/uid_123/reports/machines/mach001/daily/2026-06-08/molds/NA/stats/cycletime
+        const dailyCycletimePath = `users/${uid}/reports/machines/mach001/daily/2026-06-08/molds/NA/stats/cycletime`;
+        assert.ok(dbMockData[dailyCycletimePath], 'Daily cycletime entry should exist');
+        assert.deepStrictEqual(dbMockData[dailyCycletimePath].total, { '.sv': { increment: 32.64 } }, 'Total cycletime should increment by 32.64');
+        assert.deepStrictEqual(dbMockData[dailyCycletimePath].count, { '.sv': { increment: 2 } }, 'Non-zero count should increment by 2');
+
+        // Verify last_10 array
+        const last10Path = `${dailyCycletimePath}/last_10`;
+        assert.ok(dbMockData[last10Path], 'Last 10 entry should exist');
+        assert.deepStrictEqual(dbMockData[last10Path], [16.256, 16.384], 'last_10 should contain the two non-zero cycle times');
+
+        // B. Hourly report cycletime path: users/uid_123/reports/machines/mach001/hourly/2026-06-08/0/cycletime
+        const hourlyCycletimePath = `users/${uid}/reports/machines/mach001/hourly/2026-06-08/0/cycletime`;
+        assert.ok(dbMockData[hourlyCycletimePath], 'Hourly cycletime entry should exist');
+        assert.deepStrictEqual(dbMockData[hourlyCycletimePath].total, { '.sv': { increment: 32.64 } }, 'Hourly cycletime total should increment by 32.64');
+        assert.deepStrictEqual(dbMockData[hourlyCycletimePath].count, { '.sv': { increment: 2 } }, 'Hourly cycletime count should increment by 2');
+
+        console.log('✓ Test 6 passed.');
+    } catch (err) {
+        console.error('✗ Test 6 failed:', err);
+        process.exit(1);
+    }
+
     console.log('--- ALL TESTS PASSED SUCCESSFULLY! ---');
 }
 
