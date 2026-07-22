@@ -203,12 +203,13 @@ async function handleMessage(message) {
         const now_values = payload.now_values || {};
         const active_alerts = _unit.active_alerts_count || 0;
 
-        await writeInfluxRecord(uid, unit, {
+        await writeInfluxRecord(uid, unit, mac, {
             success,
             realtime,
             values,
             now_values,
             phase_values: payload.phase_values || {},
+            digital_values: payload.digital_values || {},
             unix,
             temperature,
             active_alerts
@@ -235,11 +236,13 @@ async function handleMessage(message) {
                     ? payload.analog_values.temperature.now
                     : payload.temp;
 
-                await writeInfluxRecord(uid, unit, {
+                await writeInfluxRecord(uid, unit, mac, {
                     success,
                     realtime,
                     values,
                     now_values,
+                    phase_values: payload.phase_values || {},
+                    digital_values: payload.digital_values || {},
                     unix,
                     temperature,
                     active_alerts
