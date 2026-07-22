@@ -1,4 +1,7 @@
 const toRange = (entry) => {
+    if (typeof entry === "number") {
+        return { start: entry, end: entry };
+    }
     if (!entry || typeof entry !== "object") return null;
     const high = Number(entry.high);
     if (!Number.isFinite(high)) return null;

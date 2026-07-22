@@ -1640,13 +1640,13 @@ async function processDigitalValues(database, uid, unit, type, id, digital_value
             const existing = Array.isArray(current) ? current : [];
             const map = new Map();
             for (const entry of existing) {
-                if (!entry || typeof entry !== "object") continue;
-                const key = `${entry.high ?? ""}-${entry.low ?? ""}`;
+                if (entry === null || entry === undefined) continue;
+                const key = typeof entry === 'number' ? String(entry) : `${entry.high ?? ""}-${entry.low ?? ""}`;
                 map.set(key, entry);
             }
             for (const entry of logs) {
-                if (!entry || typeof entry !== "object") continue;
-                const key = `${entry.high ?? ""}-${entry.low ?? ""}`;
+                if (entry === null || entry === undefined) continue;
+                const key = typeof entry === 'number' ? String(entry) : `${entry.high ?? ""}-${entry.low ?? ""}`;
                 map.set(key, entry);
             }
             return Array.from(map.values());
@@ -1718,7 +1718,7 @@ async function processDigitalValues(database, uid, unit, type, id, digital_value
             if (Array.isArray(prodLogs)) {
                 cycleTimes = prodLogs
                     .filter((entry) => toRange(entry) !== null)
-                    .map((entry) => entry.high);
+                    .map((entry) => typeof entry === 'number' ? entry : entry.high);
             }
         }
 

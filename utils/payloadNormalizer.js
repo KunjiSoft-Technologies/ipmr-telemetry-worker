@@ -131,13 +131,17 @@ function normalizePayload(raw) {
                         const low = (i + 1 < arr.length) ? arr[i + 1] : high;
                         logs.push({ high, low });
                     }
+                    dv[standardKey] = logs;
+                } else if (val.m === 4) {
+                    // Mode 4: cycle time durations (simple array of numbers)
+                    dv[standardKey] = arr;
                 } else {
                     // Other modes: single timestamps
                     for (const ts of arr) {
                         logs.push({ high: ts, low: ts });
                     }
+                    dv[standardKey] = logs;
                 }
-                dv[standardKey] = logs;
             } else {
                 dv[standardKey] = val;
             }
