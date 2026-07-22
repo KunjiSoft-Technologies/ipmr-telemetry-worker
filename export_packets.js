@@ -16,11 +16,11 @@ if (isNaN(hours) || hours <= 0) {
 const exportPackets = async () => {
     const influxUrl = process.env.INFLUX_URL;
     const org = process.env.INFLUX_ORG;
-    const bucket = process.env.INFLUX_BUCKET;
+    const bucket = process.env.INFLUX_RECORDS_BUCKET || process.env.INFLUX_BUCKET;
     const token = process.env.INFLUX_TOKEN;
 
     if (!influxUrl || !org || !bucket || !token) {
-        console.error('Missing InfluxDB configuration in .env');
+        console.error('Missing InfluxDB configuration in .env (INFLUX_URL, INFLUX_ORG, INFLUX_RECORDS_BUCKET/INFLUX_BUCKET, INFLUX_TOKEN)');
         process.exit(1);
     }
 

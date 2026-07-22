@@ -14,7 +14,7 @@ const writeInfluxRecord = async (uid, unit, mac, record) => {
     const success = record.success !== undefined ? record.success : true;
     const realtime = record.realtime !== undefined ? record.realtime : true;
 
-    const bucket = process.env.INFLUX_RECORDS_BUCKET || 'ipmr-v2-records-streams';
+    const bucket = process.env.INFLUX_RECORDS_BUCKET || 'ipmr-v2-streams';
 
     const formatJson = (val) => {
         let str = '';
