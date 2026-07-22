@@ -16,31 +16,21 @@ const writeInfluxRecord = async (uid, unit, mac, record) => {
 
     const bucket = process.env.INFLUX_RECORDS_BUCKET || 'ipmr-v2-streams';
 
-    const formatJson = (val) => {
-        let str = '';
-        if (typeof val === 'object' && val !== null) {
-            str = JSON.stringify(val);
-        } else if (typeof val === 'string') {
-            str = val;
-        } else {
-            str = '{}';
-        }
-        return str.replace(/"/g, "'");
+    const recordsDataRaw = {
+        success,
+        realtime,
+        values: record.values || { "60_a": 0 },
+        now_values: record.now_values || {},
+        phase_values: record.phase_values || {},
+        digital_values: record.digital_values || {},
+        temperature: record.temperature !== undefined && record.temperature !== null ? record.temperature : 0,
+        active_alerts: record.active_alerts || 0
     };
+    const recordsDataStr = JSON.stringify(recordsDataRaw);
+    const escapedRecordsData = recordsDataStr.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const unixVal = record.unix || Math.floor(Date.now() / 1000);
 
-    const valuesStr = formatJson(record.values || { "60_a": 0 });
-    const nowValuesStr = formatJson(record.now_values || {});
-    const phaseValuesStr = formatJson(record.phase_values || {});
-    const digitalValuesStr = formatJson(record.digital_values || {});
-    const unixVal = record.unix;
-    const temperatureVal = record.temperature !== undefined && record.temperature !== null 
-        ? Math.round(Number(record.temperature)) 
-        : 0;
-    const activeAlertsVal = record.active_alerts || 0;
-
-    // Line Protocol:
-    // ipmr-records,uid="${uid}",unit=${unit},mac="${mac}" status=${success},realtime=${realtime},values="${values}",now_values="${now_values}",phase_values="${phase_values}",digital_values="${digital_values}",unix=${unix}i,temperature=${temperature}i,active_alerts=${active_alerts}i
-    const lineProtocol = `ipmr-records,uid="${uid}",unit=${unit},mac="${mac}" status=${success},realtime=${realtime},values="${valuesStr}",now_values="${nowValuesStr}",phase_values="${phaseValuesStr}",digital_values="${digitalValuesStr}",unix=${unixVal}i,temperature=${temperatureVal}i,active_alerts=${activeAlertsVal}i`;
+    const lineProtocol = `ipmr-records,mac="${mac}" unix=${unixVal}i,records_data="${escapedRecordsData}"`;
 
     const writeUrl = `${influxUrl}/api/v2/write?org=${encodeURIComponent(org)}&bucket=${encodeURIComponent(bucket)}&precision=s`;
 
