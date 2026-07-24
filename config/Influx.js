@@ -19,12 +19,7 @@ const writeInfluxRecord = async (uid, unit, mac, record) => {
     const recordsDataRaw = {
         success,
         realtime,
-        values: record.values || { "60_a": 0 },
-        now_values: record.now_values || {},
-        phase_values: record.phase_values || {},
-        digital_values: record.digital_values || {},
-        temperature: record.temperature !== undefined && record.temperature !== null ? record.temperature : 0,
-        active_alerts: record.active_alerts || 0
+        ...record
     };
     const recordsDataStr = JSON.stringify(recordsDataRaw);
     const escapedRecordsData = recordsDataStr.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
