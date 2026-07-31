@@ -204,6 +204,7 @@ async function handleMessage(message) {
         const active_alerts = _unit.active_alerts_count || 0;
 
         await writeInfluxRecord(uid, unit, mac, {
+            ...payload,
             success,
             realtime,
             values,
@@ -237,6 +238,7 @@ async function handleMessage(message) {
                     : payload.temp;
 
                 await writeInfluxRecord(uid, unit, mac, {
+                    ...payload,
                     success,
                     realtime,
                     values,
