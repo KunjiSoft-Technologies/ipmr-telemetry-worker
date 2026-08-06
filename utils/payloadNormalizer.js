@@ -98,6 +98,12 @@ function normalizePayload(raw) {
                         }
                         mappedObj[standardStat] = val;
                     }
+                    if (mappedObj.min === undefined) {
+                        const numericVals = Object.values(mappedObj).filter(v => typeof v === 'number');
+                        if (numericVals.length > 0) {
+                            mappedObj.min = Math.min(...numericVals);
+                        }
+                    }
                     pData[standardParam] = mappedObj;
                 } else {
                     let val = pvObj;

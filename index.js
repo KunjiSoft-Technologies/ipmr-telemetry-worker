@@ -34,11 +34,21 @@ const subscription = pubsub.subscription(subscriptionName, {
 async function handleMessage(message) {
     console.log(`[Pub/Sub] Raw message received. Attributes:`, message.attributes, `Body:`, message.data.toString());
     const attributes = message.attributes || {};
-    const mac = attributes.machine_id;
     const unixStr = attributes.timestamp;
+    let rawPayload = {};
+    try {
+        rawPayload = JSON.parse(message.data.toString());
+        console.log(`[Pub/Sub] Incoming message body parsed. action: ${rawPayload.action}, remaining: ${rawPayload.remaining} (type: ${typeof rawPayload.remaining})`);
+    } catch (err) {
+        console.error('Failed to parse message payload JSON. Acknowledging and skipping.', err);
+        message.ack();
+        return;
+    }
+
+    const mac = (attributes.machine_id || attributes.macAddress || attributes.mac || rawPayload.macAddress || rawPayload.mac || rawPayload.machine_id || '').toLowerCase();
 
     if (!mac) {
-        console.warn('Received message without machine_id attribute. Acknowledging and skipping.');
+        console.warn('Received message without valid MAC attribute or payload field. Acknowledging and deleting message from Pub/Sub.');
         message.ack();
         return;
     }
@@ -48,9 +58,6 @@ async function handleMessage(message) {
     let unix = unixStr ? Number(unixStr) : Math.floor(Date.now() / 1000);
 
     try {
-        const rawPayload = JSON.parse(message.data.toString());
-        console.log(`[Pub/Sub] Incoming message body parsed. action: ${rawPayload.action}, remaining: ${rawPayload.remaining} (type: ${typeof rawPayload.remaining})`);
-        
         payload = normalizePayload(rawPayload);
 
         // Check if remaining key is present directly in the raw payload (regardless of action)
@@ -64,7 +71,7 @@ async function handleMessage(message) {
             unix = Number(packetUnix);
         }
     } catch (err) {
-        console.error('Failed to parse message payload JSON. Acknowledging and skipping.', err);
+        console.error('Failed to normalize payload. Acknowledging and skipping.', err);
         message.ack();
         return;
     }
@@ -80,8 +87,8 @@ async function handleMessage(message) {
     try {
         // 3. Check and load/initialize the _unit object
         const lookupResult = await lookupMacAndUnit(mac);
-        if (!lookupResult) {
-            console.warn(`Unmapped MAC address: ${mac}. Acknowledging and skipping.`);
+        if (!lookupResult || !lookupResult.uid || lookupResult.unit === undefined) {
+            console.warn(`Unmapped or non-existent MAC address in DB: ${mac}. Acknowledging and deleting message from Pub/Sub.`);
             message.ack();
             return;
         }
