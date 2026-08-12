@@ -7,6 +7,7 @@ const { writeInfluxRecord } = require('./config/Influx');
 const { lookupMacAndUnit, saveUnitToCache } = require('./services/macLookup');
 const {
     checkDuplicate,
+    updatePacketState,
     verifySequence,
     trackTemperature,
     processPhaseValues,
@@ -198,11 +199,18 @@ async function handleMessage(message) {
             }
         }
 
-        // 9. Evaluate alerts
+        // 9. Evaluate alerts safely (failure here should not abort report saving)
         const isVoltageBelowThreshold = checkVoltageBelowThreshold(payload.phase_values);
         if (connection && connection.type && connection.id && !isVoltageBelowThreshold) {
-            await processAlerts(uid, unit, connection.type, connection.id, unix, payload, redis, database, _unit);
+            try {
+                await processAlerts(uid, unit, connection.type, connection.id, unix, payload, redis, database, _unit);
+            } catch (alertErr) {
+                console.error(`Error processing alerts for MAC ${mac}:`, alertErr);
+            }
         }
+
+        // 9.1 Update packet state in RTDB & cache ONLY AFTER successful statistical processing
+        await updatePacketState(database, uid, unit, unix, _unit);
 
         // 10. Write telemetry record to InfluxDB
         const realtime = !_unit.uploadingPrev?.status;

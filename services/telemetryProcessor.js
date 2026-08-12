@@ -25,18 +25,23 @@ async function checkDuplicate(database, uid, unit, unix, _unit, redis, saveUnitT
     if (unix <= lastUnix) {
         // Increment /users/${uid}/units/${unit}/repeatedID by 1 in RTDB
         await database.ref(`/users/${uid}/units/${unit}/repeatedID`).set(admin.database.ServerValue.increment(1));
-        // Save the updated _unit in Redis (which updates expiration/state)
         if (saveUnitToCache) {
             await saveUnitToCache(uid, unit, _unit);
         }
         return true;
     }
-    // Update local _unit and write to RTDB
+    return false;
+}
+
+/**
+ * Updates packet state in local cache and RTDB after successful processing.
+ */
+async function updatePacketState(database, uid, unit, unix, _unit) {
+    const lastUnix = _unit.packetID?.val || 0;
     _unit.previousUnix = lastUnix;
     _unit.packetID = _unit.packetID || {};
     _unit.packetID.val = unix;
     await database.ref(`/users/${uid}/units/${unit}/packetID`).set(unix);
-    return false;
 }
 
 /**
@@ -1729,6 +1734,7 @@ async function processDigitalValues(database, uid, unit, type, id, digital_value
 
 module.exports = {
     checkDuplicate,
+    updatePacketState,
     verifySequence,
     trackTemperature,
     processPhaseValues,
