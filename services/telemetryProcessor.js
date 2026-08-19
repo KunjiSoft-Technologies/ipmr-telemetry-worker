@@ -37,8 +37,7 @@ async function checkDuplicate(database, uid, unit, unix, _unit, redis, saveUnitT
  * Updates packet state in local cache and RTDB after successful processing.
  */
 async function updatePacketState(database, uid, unit, unix, _unit) {
-    const lastUnix = _unit.packetID?.val || 0;
-    _unit.previousUnix = lastUnix;
+    _unit.previousUnix = unix;
     _unit.packetID = _unit.packetID || {};
     _unit.packetID.val = unix;
     await database.ref(`/users/${uid}/units/${unit}/packetID`).set(unix);

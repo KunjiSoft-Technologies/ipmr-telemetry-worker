@@ -115,6 +115,7 @@ async function lookupMacAndUnit(mac) {
         }
         if (results.packetID !== null && results.packetID !== undefined) {
             _unit.packetID.val = results.packetID;
+            _unit.previousUnix = results.packetID;
         }
         if (results.packetOrder !== null && results.packetOrder !== undefined) {
             _unit.packetOrder = results.packetOrder;
