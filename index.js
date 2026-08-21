@@ -110,7 +110,7 @@ async function handleMessage(message) {
         unitLockAcquired = true;
 
         // 4. Perform duplicate packet checking
-        const isDuplicate = await checkDuplicate(database, uid, unit, unix, _unit, redis, saveUnitToCache);
+        const isDuplicate = await checkDuplicate(database, uid, unit, unix, _unit, redis, saveUnitToCache, remaining);
         if (isDuplicate) {
             console.log(`Duplicate/late packet received for MAC ${mac} (unix: ${unix}). Acknowledging and skipping.`);
             message.ack();

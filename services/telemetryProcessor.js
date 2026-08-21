@@ -7,11 +7,11 @@ const { toRange } = require('../utils/overlapHelpers');
  * Checks for replay/duplicate packets.
  * @returns {Promise<boolean>} - True if it is a duplicate and we should abort.
  */
-async function checkDuplicate(database, uid, unit, unix, _unit, redis, saveUnitToCache) {
+async function checkDuplicate(database, uid, unit, unix, _unit, redis, saveUnitToCache, remaining = null) {
     if (redis) {
         try {
             const lockKey = `packet_lock:${uid}:${unit}:${unix}`;
-            const acquired = await redis.set(lockKey, '1', 'NX', 'EX', 30);
+            const acquired = await redis.set(lockKey, '1', 'NX', 'EX', 86400);
             if (!acquired) {
                 console.log(`Lock already exists for packet ${lockKey}. Skipping as duplicate.`);
                 return true;
@@ -21,14 +21,17 @@ async function checkDuplicate(database, uid, unit, unix, _unit, redis, saveUnitT
         }
     }
 
-    const lastUnix = _unit.packetID?.val || 0;
-    if (unix <= lastUnix) {
-        // Increment /users/${uid}/units/${unit}/repeatedID by 1 in RTDB
-        await database.ref(`/users/${uid}/units/${unit}/repeatedID`).set(admin.database.ServerValue.increment(1));
-        if (saveUnitToCache) {
-            await saveUnitToCache(uid, unit, _unit);
+    const isOffline = (remaining !== null && remaining > 0) || (_unit.uploadingPrev?.status === true);
+    if (!isOffline) {
+        const lastUnix = _unit.packetID?.val || 0;
+        if (unix <= lastUnix) {
+            // Increment /users/${uid}/units/${unit}/repeatedID by 1 in RTDB
+            await database.ref(`/users/${uid}/units/${unit}/repeatedID`).set(admin.database.ServerValue.increment(1));
+            if (saveUnitToCache) {
+                await saveUnitToCache(uid, unit, _unit);
+            }
+            return true;
         }
-        return true;
     }
     return false;
 }
@@ -39,8 +42,10 @@ async function checkDuplicate(database, uid, unit, unix, _unit, redis, saveUnitT
 async function updatePacketState(database, uid, unit, unix, _unit) {
     _unit.previousUnix = unix;
     _unit.packetID = _unit.packetID || {};
-    _unit.packetID.val = unix;
-    await database.ref(`/users/${uid}/units/${unit}/packetID`).set(unix);
+    if (unix > (_unit.packetID.val || 0)) {
+        _unit.packetID.val = unix;
+        await database.ref(`/users/${uid}/units/${unit}/packetID`).set(unix);
+    }
 }
 
 /**

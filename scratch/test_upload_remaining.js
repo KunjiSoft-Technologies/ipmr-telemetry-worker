@@ -78,10 +78,12 @@ const macLookupMock = {
 
 const telemetryProcessorMock = {
     checkDuplicate: async () => false,
+    updatePacketState: async () => {},
     verifySequence: async () => {},
     trackTemperature: async () => 25,
     processPhaseValues: async () => {},
-    processDigitalValues: async () => {}
+    processDigitalValues: async () => {},
+    checkVoltageBelowThreshold: () => false
 };
 
 const alertManagerMock = {
