@@ -39,4 +39,4 @@ const secToTime = (time) => {
     return (new Date(time * 1000).toISOString().substr(11, 8).slice(0, -3));
 };
 
-module.exports = { getToday, whatHour, secToTime };
+module.exports = { getLocalMoment, getToday, whatHour, secToTime };

@@ -1,5 +1,7 @@
 const admin = require('firebase-admin');
-require('dotenv').config();
+const path = require('path');
+const fs = require('fs');
+require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 
 const databaseUrl = process.env.FIREBASE_DATABASE_URL;
 
@@ -15,12 +17,13 @@ if (!admin.apps.length) {
             if (trimmed.startsWith('{')) {
                 config.credential = admin.credential.cert(JSON.parse(trimmed));
             } else {
-                const fs = require('fs');
-                const path = require('path');
-                // Resolve path relative to current workspace or absolute
-                const absolutePath = path.isAbsolute(trimmed) 
+                // Resolve path relative to project root or current working dir or absolute
+                let absolutePath = path.isAbsolute(trimmed) 
                     ? trimmed 
-                    : path.resolve(process.cwd(), trimmed);
+                    : path.resolve(__dirname, '..', trimmed);
+                if (!fs.existsSync(absolutePath)) {
+                    absolutePath = path.resolve(process.cwd(), trimmed);
+                }
                 if (fs.existsSync(absolutePath)) {
                     const serviceAccount = JSON.parse(fs.readFileSync(absolutePath, 'utf8'));
                     config.credential = admin.credential.cert(serviceAccount);

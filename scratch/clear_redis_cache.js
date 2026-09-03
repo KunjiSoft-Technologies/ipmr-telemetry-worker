@@ -2,23 +2,10 @@ const redis = require('../config/redis');
 
 async function clearCache() {
     try {
-        console.log('Fetching cached keys...');
-        
-        // Delete the entire 'units' hash
-        const unitsDeleted = await redis.del('units');
-        console.log(`Deleted 'units' hash: ${unitsDeleted > 0 ? 'Yes' : 'No'}`);
-        
-        // Find all mac_mapping:* keys and delete them
-        const keys = await redis.keys('mac_mapping:*');
-        if (keys.length > 0) {
-            console.log(`Found mapping keys: ${keys.join(', ')}`);
-            const mappingDeleted = await redis.del(...keys);
-            console.log(`Deleted mapping keys count: ${mappingDeleted}`);
-        } else {
-            console.log('No mac_mapping:* keys found.');
-        }
-        
-        console.log('Cache cleared successfully!');
+        console.log('Clearing all Redis cache with FLUSHDB...');
+        const result = await redis.flushdb();
+        console.log(`FLUSHDB result: ${result}`);
+        console.log('All Redis cache cleared successfully!');
     } catch (err) {
         console.error('Error clearing cache:', err);
     } finally {

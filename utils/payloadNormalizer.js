@@ -174,6 +174,21 @@ function normalizePayload(raw) {
         normalized.analog_values = av;
     }
 
+    // Normalize power_event / pe
+    const rawPe = normalized.pe || normalized.power_event;
+    if (rawPe && typeof rawPe === 'object') {
+        const offVal = rawPe.OFF !== undefined ? rawPe.OFF : rawPe.off;
+        const onVal = rawPe.ON !== undefined ? rawPe.ON : rawPe.on;
+        const peObj = {
+            OFF: offVal !== undefined ? Number(offVal) : undefined,
+            ON: onVal !== undefined ? Number(onVal) : undefined,
+            off: offVal !== undefined ? Number(offVal) : undefined,
+            on: onVal !== undefined ? Number(onVal) : undefined
+        };
+        normalized.pe = peObj;
+        normalized.power_event = peObj;
+    }
+
     return normalized;
 }
 

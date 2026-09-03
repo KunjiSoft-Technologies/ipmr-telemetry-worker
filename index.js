@@ -15,6 +15,7 @@ const {
     checkVoltageBelowThreshold
 } = require('./services/telemetryProcessor');
 const { processAlerts } = require('./services/alertManager');
+const { processPowerEvent } = require('./services/powerEventManager');
 const { normalizePayload } = require('./utils/payloadNormalizer');
 const { getToday } = require('./utils/timeHelpers');
 
@@ -119,6 +120,11 @@ async function handleMessage(message) {
 
         // 5. Perform packet ID sequencing check
         await verifySequence(database, uid, unit, payload, _unit);
+
+        // 5.1 Process Power Event (pe) if present
+        if (payload.pe) {
+            await processPowerEvent(database, uid, unit, payload.pe, _unit);
+        }
 
         // Update lastContact, cleanDisconnect, and handle remaining/offline-complete logic in RTDB
         const updateFields = {
