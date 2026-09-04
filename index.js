@@ -62,9 +62,13 @@ async function handleMessage(message) {
     try {
         payload = normalizePayload(rawPayload);
 
-        // Check if remaining key is present directly in the raw payload (regardless of action)
+        // Check if remaining key is present directly in the raw payload or nested data (regardless of action)
         if (rawPayload.remaining !== undefined && rawPayload.remaining !== null) {
             remaining = Number(rawPayload.remaining);
+        } else if (rawPayload.data && rawPayload.data.remaining !== undefined && rawPayload.data.remaining !== null) {
+            remaining = Number(rawPayload.data.remaining);
+        } else if (payload.remaining !== undefined && payload.remaining !== null) {
+            remaining = Number(payload.remaining);
         }
 
         // If the telemetry payload has an internal timestamp, use it

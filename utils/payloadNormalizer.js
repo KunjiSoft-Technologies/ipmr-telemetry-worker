@@ -67,10 +67,16 @@ const ANALOG_KEYS = {
 function normalizePayload(raw) {
     if (!raw || typeof raw !== 'object') return raw;
 
+    // If raw contains a nested data object, merge it so inner telemetry properties
+    // (pv, av, dv, packet_id, missing_in_last_10, last_10_packets, etc.) are at the root
+    const source = (raw.data && typeof raw.data === 'object' && !Array.isArray(raw.data))
+        ? { ...raw, ...raw.data }
+        : raw;
+
     const normalized = {};
 
     // Map top-level keys
-    for (const [key, val] of Object.entries(raw)) {
+    for (const [key, val] of Object.entries(source)) {
         const standardKey = ROOT_KEYS[key] || key;
         normalized[standardKey] = val;
     }

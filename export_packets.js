@@ -32,7 +32,7 @@ const exportPackets = async () => {
           |> range(start: -${hours}h)
           |> filter(fn: (r) => r._measurement == "ipmr-records")
           |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
-          |> keep(columns: ["_time", "uid", "unit", "unix", "status", "realtime", "values", "now_values", "phase_values", "digital_values", "temperature", "active_alerts"])
+          |> keep(columns: ["_time", "uid", "unit", "unix", "status", "realtime", "values", "now_values", "phase_values", "digital_values", "temperature", "active_alerts", "packet_id", "missing_in_last_10", "last_10_packets", "records_data"])
           |> sort(columns: ["_time"], desc: true)
     `.trim();
 
