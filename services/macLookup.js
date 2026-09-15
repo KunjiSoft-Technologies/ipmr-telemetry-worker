@@ -198,7 +198,7 @@ async function lookupMacAndUnit(mac) {
         uid,
         unit,
         connection,
-        inputs: mapping.inputs || null,
+        inputs: mapping.inputs || (_unit && _unit.connection && _unit.connection.inputs) || null,
         _unit
     };
 }

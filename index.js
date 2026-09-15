@@ -102,7 +102,7 @@ async function handleMessage(message) {
         uid = lookupResult.uid;
         unit = lookupResult.unit;
         connection = lookupResult.connection;
-        const inputs = lookupResult.inputs;
+        const inputs = lookupResult.inputs || (_unit && _unit.connection && _unit.connection.inputs) || null;
         _unit = lookupResult._unit;
 
         // 3.1 Acquire unit processing lock to prevent concurrent processing for the same MAC
@@ -198,10 +198,18 @@ async function handleMessage(message) {
         // 7 & 8. Process daily/hourly statistics if connection details are present
         if (connection && connection.type && connection.id) {
             if (payload.phase_values) {
-                await processPhaseValues(database, uid, unit, connection.type, connection.id, payload.phase_values, unix, _unit);
+                try {
+                    await processPhaseValues(database, uid, unit, connection.type, connection.id, payload.phase_values, unix, _unit);
+                } catch (phaseErr) {
+                    console.error(`Error processing phase values for ${connection.type}/${connection.id}:`, phaseErr);
+                }
             }
             if (connection.type === 'machines' || payload.digital_values) {
-                await processDigitalValues(database, uid, unit, connection.type, connection.id, payload.digital_values || {}, unix, _unit, inputs);
+                try {
+                    await processDigitalValues(database, uid, unit, connection.type, connection.id, payload.digital_values || {}, unix, _unit, inputs);
+                } catch (digitalErr) {
+                    console.error(`Error processing digital values for ${connection.type}/${connection.id}:`, digitalErr);
+                }
             }
             // Save targets back to RTDB
             if (_unit.targets) {

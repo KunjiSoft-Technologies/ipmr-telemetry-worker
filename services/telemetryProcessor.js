@@ -1522,7 +1522,7 @@ async function processPhaseValues(database, uid, unit, type, id, phase_values, u
                 };
 
                 transactionPromises.push(
-                    database.ref(`users/${uid}/reports/${type}/${id}/daily/${today}/phase_values/${phase}/${param}`).transaction(txFnDaily)
+                    database.ref(`users/${uid}/reports/${type}/${id}/daily/${today}/phase_values/${phase}/${param}`).transaction(txFnDaily, undefined, false)
                 );
             }
 
@@ -1602,13 +1602,17 @@ async function processPhaseValues(database, uid, unit, type, id, phase_values, u
                         return nextVal;
                     };
                     transactionPromises.push(
-                        database.ref(`users/${uid}/reports/${type}/${id}/hourly/${today}/${hourlyReportKey}/phase_values/${phase}/${param}`).transaction(txFnHouly)
+                        database.ref(`users/${uid}/reports/${type}/${id}/hourly/${today}/${hourlyReportKey}/phase_values/${phase}/${param}`).transaction(txFnHouly, undefined, false)
                     );
                 }
             }
         }
     }
-    await Promise.all(transactionPromises);
+    try {
+        await Promise.all(transactionPromises);
+    } catch (metricTxErr) {
+        console.warn(`[PhaseValues] Warning: One or more phase metric transactions encountered an issue for ${type}/${id}:`, metricTxErr.message);
+    }
 }
 
 async function processDigitalValues(database, uid, unit, type, id, digital_values, unix, _unit, inputs) {
@@ -1662,8 +1666,8 @@ async function processDigitalValues(database, uid, unit, type, id, digital_value
         };
 
         ioTransactionPromises.push(
-            database.ref(`users/${uid}/reports/${type}/${id}/daily/${today}/digital_values/${signal}`).transaction(txFn),
-            database.ref(`users/${uid}/reports/${type}/${id}/hourly/${today}/${hourlyReportKey}/digital_values/${signal}`).transaction(txFn)
+            database.ref(`users/${uid}/reports/${type}/${id}/daily/${today}/digital_values/${signal}`).transaction(txFn, undefined, false),
+            database.ref(`users/${uid}/reports/${type}/${id}/hourly/${today}/${hourlyReportKey}/digital_values/${signal}`).transaction(txFn, undefined, false)
         );
     }
 
