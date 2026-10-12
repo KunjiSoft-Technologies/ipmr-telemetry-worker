@@ -131,10 +131,12 @@ async function handleMessage(message) {
         }
 
         // Update lastContact, cleanDisconnect, and handle remaining/offline-complete logic in RTDB
+        const nowUnix = Math.floor(Date.now() / 1000);
         const updateFields = {
-            lastContact: unix,
+            lastContact: nowUnix,
             cleanDisconnect: false
         };
+        _unit.lastContact = nowUnix;
 
         if (remaining !== null) {
             if (remaining > 0) {

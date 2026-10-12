@@ -161,7 +161,9 @@ async function runTests() {
         assert.strictEqual(dbMockData[unitPath].uploadRemaining, 45, 'uploadRemaining should be 45');
         const moment = require('moment');
         assert.strictEqual(dbMockData[unitPath].uploadedTil, moment.unix(1782145451).utc().format("YYYY-MM-DD HH:mm:ss"), 'uploadedTil should match packet timestamp');
-        assert.strictEqual(mockUnit.uploadingPrev.status, true, 'uploadingPrev status should be true');
+        assert.notStrictEqual(dbMockData[unitPath].lastContact, 1782145451, 'lastContact should not be historical packet timestamp');
+        assert(Math.abs(dbMockData[unitPath].lastContact - Math.floor(Date.now() / 1000)) <= 5, 'lastContact should reflect current time');
+        assert.strictEqual(mockUnit.lastContact, dbMockData[unitPath].lastContact, '_unit.lastContact should match RTDB lastContact');
 
         console.log('✓ Test 1 passed.');
     } catch (err) {
