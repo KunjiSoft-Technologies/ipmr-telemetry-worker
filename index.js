@@ -12,7 +12,8 @@ const {
     trackTemperature,
     processPhaseValues,
     processDigitalValues,
-    checkVoltageBelowThreshold
+    checkVoltageBelowThreshold,
+    checkAndInstallPendingMold
 } = require('./services/telemetryProcessor');
 const { processAlerts } = require('./services/alertManager');
 const { processPowerEvent } = require('./services/powerEventManager');
@@ -124,6 +125,23 @@ async function handleMessage(message) {
 
         // 5. Perform packet ID sequencing check
         await verifySequence(database, uid, unit, payload, _unit);
+
+        // 5.0 Check and install pending mold if applicable
+        if (connection && connection.type === 'machines' && connection.id) {
+            try {
+                await checkAndInstallPendingMold(database, uid, unit, connection.id, unix, _unit);
+            } catch (moldErr) {
+                console.error(`Error checking/installing pending mold for MAC ${mac} (machine: ${connection.id}):`, moldErr);
+            }
+        } else if (_unit.machines && Object.keys(_unit.machines).length > 0) {
+            for (const mId of Object.keys(_unit.machines)) {
+                try {
+                    await checkAndInstallPendingMold(database, uid, unit, mId, unix, _unit);
+                } catch (moldErr) {
+                    console.error(`Error checking/installing pending mold for MAC ${mac} (machine: ${mId}):`, moldErr);
+                }
+            }
+        }
 
         // 5.1 Process Power Event (pe) if present
         if (payload.pe) {

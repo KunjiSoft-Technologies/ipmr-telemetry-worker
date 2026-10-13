@@ -42,10 +42,14 @@ async function lookupMacAndUnit(mac) {
         return null;
     }
 
-    // 2. Fetch Unit Data: look up the full _unit object from Redis hash units using field ${uid}-${unit}
+    // 2. Fetch Unit Data: look up the full _unit object from Redis string key or hash
     const hashField = `${uid}-${unit}`;
+    const stringKey = `units-${hashField}`;
     let _unit = null;
-    const _unitRaw = await redis.hget('units', hashField);
+    let _unitRaw = await redis.get(stringKey);
+    if (!_unitRaw) {
+        _unitRaw = await redis.hget('units', hashField);
+    }
 
     if (_unitRaw) {
         try {
@@ -55,7 +59,10 @@ async function lookupMacAndUnit(mac) {
                 _unit = parsed;
             } else {
                 // Expired. Clean up.
-                await redis.hdel('units', hashField);
+                await Promise.all([
+                    redis.del(stringKey),
+                    redis.hdel('units', hashField)
+                ]);
             }
         } catch (e) {
             console.error(`Error parsing cached _unit for ${hashField}:`, e);
@@ -147,7 +154,7 @@ async function lookupMacAndUnit(mac) {
             if (machine && Number(machine.unit) === Number(unit)) {
                 _unit.machines[key] = machine;
                 if (machine.pending_mold !== undefined) {
-                    _unit.machinePendingData[machine.post] = machine.pending_mold;
+                    _unit.machinePendingData[key] = machine.pending_mold;
                 }
             }
         }
@@ -190,8 +197,12 @@ async function lookupMacAndUnit(mac) {
         // Set local expiration timestamp (TTL 600s)
         _unit.expiresAt = Date.now() + 600 * 1000;
 
-        // Cache _unit in Redis hash units under field ${uid}-${unit}
-        await redis.hset('units', hashField, JSON.stringify(_unit));
+        // Cache _unit in Redis string key and hash
+        const serialized = JSON.stringify(_unit);
+        await Promise.all([
+            redis.set(stringKey, serialized, 'EX', 600),
+            redis.hset('units', hashField, serialized)
+        ]);
     }
 
     return {
@@ -211,8 +222,13 @@ async function lookupMacAndUnit(mac) {
  */
 async function saveUnitToCache(uid, unit, _unit) {
     const hashField = `${uid}-${unit}`;
+    const stringKey = `units-${hashField}`;
     _unit.expiresAt = Date.now() + 600 * 1000; // Extend TTL
-    await redis.hset('units', hashField, JSON.stringify(_unit));
+    const serialized = JSON.stringify(_unit);
+    await Promise.all([
+        redis.set(stringKey, serialized, 'EX', 600),
+        redis.hset('units', hashField, serialized)
+    ]);
 }
 
 module.exports = {

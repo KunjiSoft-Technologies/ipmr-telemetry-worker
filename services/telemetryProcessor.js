@@ -1615,6 +1615,64 @@ async function processPhaseValues(database, uid, unit, type, id, phase_values, u
     }
 }
 
+/**
+ * Checks for and installs any pending mold for a machine once its scheduled start time has arrived.
+ *
+ * @param {Object} database - Firebase RTDB instance
+ * @param {string} uid - User ID
+ * @param {number} unit - Unit number
+ * @param {string} machineId - Machine ID/key
+ * @param {number} unix - Current packet unix timestamp
+ * @param {Object} _unit - In-memory / cached unit object
+ */
+async function checkAndInstallPendingMold(database, uid, unit, machineId, unix, _unit) {
+    if (!machineId || !_unit) return;
+
+    if (!_unit.machinePendingData) _unit.machinePendingData = {};
+
+    let pendingData = _unit.machinePendingData[machineId];
+
+    // Fallback: check in-memory machine object if it has pending_mold
+    if (!pendingData && _unit.machines?.[machineId]?.pending_mold) {
+        pendingData = _unit.machines[machineId].pending_mold;
+        _unit.machinePendingData[machineId] = pendingData;
+    }
+
+    // If pending mold exists and its scheduled start time has passed or arrived
+    if (pendingData && pendingData.mold_start_time !== undefined && Number(pendingData.mold_start_time) <= unix) {
+        console.log(`[PendingMold] Installing mold for machine ${machineId} (uid: ${uid}) at unix ${unix}. Mold:`, pendingData.installedMold?.name);
+        try {
+            const updates = {
+                ...pendingData
+            };
+            if (pendingData.installedMold?.name) {
+                updates.mold_name = pendingData.installedMold.name;
+            }
+
+            // 1. Update machine in RTDB with installedMold, mold_start_time, and mold_name
+            await database.ref(`users/${uid}/machines/${machineId}`).update(updates);
+
+            // 2. Remove pending_mold from RTDB
+            await database.ref(`users/${uid}/machines/${machineId}/pending_mold`).remove();
+
+            // 3. Update in-memory machine object
+            if (_unit.machines?.[machineId]) {
+                Object.keys(updates).forEach(key => {
+                    _unit.machines[machineId][key] = updates[key];
+                });
+                delete _unit.machines[machineId].pending_mold;
+            }
+
+            // 4. Clean up pendingData
+            delete _unit.machinePendingData[machineId];
+
+            console.log(`[PendingMold] Successfully installed mold ${pendingData.installedMold?.name} for machine ${machineId}`);
+        } catch (err) {
+            console.error(`[PendingMold] Error installing pending mold for machine ${machineId}:`, err);
+        }
+    }
+}
+
 async function processDigitalValues(database, uid, unit, type, id, digital_values, unix, _unit, inputs) {
     const today = getToday(uid, unix, _unit);
     const hour = whatHour(uid, unix, _unit);
@@ -1680,6 +1738,7 @@ async function processDigitalValues(database, uid, unit, type, id, digital_value
 
     // Call production counting and target checking if type is machines
     if (type === 'machines') {
+        await checkAndInstallPendingMold(database, uid, unit, id, unix, _unit);
         const timeDiff = _unit.previousUnix ? (unix - _unit.previousUnix) : 0;
         const safeTimeDiff = (timeDiff < 0 || timeDiff > 3600) ? 0 : timeDiff;
 
@@ -1747,5 +1806,6 @@ module.exports = {
     trackTemperature,
     processPhaseValues,
     processDigitalValues,
-    checkVoltageBelowThreshold
+    checkVoltageBelowThreshold,
+    checkAndInstallPendingMold
 };
