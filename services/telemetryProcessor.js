@@ -380,7 +380,7 @@ async function countProduction(database, uid, unit, name, value, time, unix, _un
                     if (percentage >= 50) target.milestone = 50;
                     if (percentage >= 75) target.milestone = 75;
                     if (percentage >= 100) target.milestone = 100;
-                    if (target.current >= target.total) target.completed = true;
+                    if (target.current >= target.total && !target.isSap && !target.noAutoComplete) target.completed = true;
                     if (target.monitorDowntime !== undefined) {
                         machineObj["monitor-downtime"] = percentage < 100;
                     }
