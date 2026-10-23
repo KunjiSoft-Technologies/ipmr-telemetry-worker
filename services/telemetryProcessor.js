@@ -1376,11 +1376,26 @@ async function processPhaseValues(database, uid, unit, type, id, phase_values, u
                             }
 
                             // Rule 5: Rollover/Reset case - incoming value is less than previous raw value
-                            // We increment lifetime by incomingValue (since it reset to 0 and grew to incomingValue)
-                            incrementBy = incomingValue;
-                            return {
-                                raw: incomingValue,
-                                lifetime: dbLifetimeValue + incrementBy
+                            // Genuine reset or register rollover: meter wrapped to 0 or was replaced, starting near zero.
+                            // We guard against out-of-order packets, offline historical packets, dual-format interleaving,
+                            // or minor Modbus sensor jitter which would otherwise add the entire lifetime meter value.
+                            const RESET_THRESHOLD = 10000; // 10 kWh (10,000 Wh)
+                            const isGenuineReset = incomingValue <= RESET_THRESHOLD && (dbRawValue - incomingValue > 1000);
+
+                            if (isGenuineReset) {
+                                incrementBy = incomingValue;
+                                return {
+                                    raw: incomingValue,
+                                    lifetime: dbLifetimeValue + incrementBy
+                                };
+                            }
+
+                            // Otherwise, this is sensor jitter, packet reordering, or historical offline upload.
+                            // Ignore the drop (incrementBy = 0) and preserve dbRawValue to prevent double-counting.
+                            incrementBy = 0;
+                            return current || {
+                                raw: dbRawValue,
+                                lifetime: dbLifetimeValue
                             };
                         });
 

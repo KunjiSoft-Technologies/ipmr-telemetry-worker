@@ -537,6 +537,85 @@ async function runTests() {
         process.exit(1);
     }
 
+    // Test 2.12: Jitter / out-of-order drop (e.g. 457800 -> 457700) does not cause spikes and does not downgrade raw
+    try {
+        console.log('Running test 2.12: Accumulator jitter / out-of-order drop handling...');
+
+        const accumPath = `users/${uid}/reports/machines/mach001/accumulators/SUM_WH_Total`;
+        const accumStatePath = `users/${uid}/reports/machines/mach001/accumulators_state/SUM_WH_Total`;
+        const dailyTotalPath = `users/${uid}/reports/machines/mach001/daily/2026-06-08/total`;
+
+        // 1. Initialize state at 457,800 Wh (457.8 kWh)
+        dbMockData[accumPath] = 457800;
+        dbMockData[accumStatePath] = {
+            raw: 457800,
+            lifetime: 457800
+        };
+        dbMockData[dailyTotalPath] = {
+            electricity_usage: { '.sv': { increment: 0 } },
+            'accumulators/SUM_WH_Total': { '.sv': { increment: 0 } }
+        };
+
+        // 2. Incoming packet with 457,700 Wh (-100 Wh drop due to sensor jitter or dual packet interleaving)
+        const phaseValuesDrop = {
+            R: { VOLTAGE: { now: 220 } },
+            SUM: {
+                SUM_WH_Total: { now: 457700 }
+            }
+        };
+
+        await processPhaseValues(mockDb, uid, unit, 'machines', 'mach001', phaseValuesDrop, unixTime, mockUnit);
+
+        // Verification for dropped/jitter packet:
+        // Must NOT add 457.7 kWh!
+        assert.strictEqual(dbMockData[accumPath], 457800, 'Accumulator SUM_WH_Total must not downgrade on minor drop');
+        assert.strictEqual(dbMockData[accumStatePath].raw, 457800, 'Raw state must preserve maximum baseline (457800)');
+        assert.strictEqual(dbMockData[dailyTotalPath].electricity_usage['.sv'].increment, 0, 'Electricity usage must NOT spike on drop');
+
+        // 3. Subsequent packet arrives with 457,900 Wh (+100 Wh delta from true baseline 457800)
+        dbMockData[dailyTotalPath] = {
+            electricity_usage: { '.sv': { increment: 0 } },
+            'accumulators/SUM_WH_Total': { '.sv': { increment: 0 } }
+        };
+        const phaseValuesNext = {
+            R: { VOLTAGE: { now: 220 } },
+            SUM: {
+                SUM_WH_Total: { now: 457900 }
+            }
+        };
+
+        await processPhaseValues(mockDb, uid, unit, 'machines', 'mach001', phaseValuesNext, unixTime + 5, mockUnit);
+
+        // Verification: increment is exactly 100 Wh (0.1 kWh), accumulator becomes 457900
+        assert.strictEqual(dbMockData[accumPath], 457900, 'Accumulator SUM_WH_Total must increment to 457900');
+        assert.strictEqual(dbMockData[accumStatePath].raw, 457900, 'Raw state must update to 457900');
+        assert.strictEqual(dbMockData[dailyTotalPath].electricity_usage['.sv'].increment, 0.1, 'Electricity usage should increment by exactly 0.1 kWh');
+
+        // 4. Historical offline packet arrives from the past with 450,000 Wh
+        dbMockData[dailyTotalPath] = {
+            electricity_usage: { '.sv': { increment: 0 } },
+            'accumulators/SUM_WH_Total': { '.sv': { increment: 0 } }
+        };
+        const phaseValuesHistorical = {
+            R: { VOLTAGE: { now: 220 } },
+            SUM: {
+                SUM_WH_Total: { now: 450000 }
+            }
+        };
+
+        await processPhaseValues(mockDb, uid, unit, 'machines', 'mach001', phaseValuesHistorical, unixTime - 600, mockUnit);
+
+        // Verification: historical packet must be ignored and not spike
+        assert.strictEqual(dbMockData[accumPath], 457900, 'Accumulator SUM_WH_Total must remain 457900');
+        assert.strictEqual(dbMockData[accumStatePath].raw, 457900, 'Raw state must remain 457900');
+        assert.strictEqual(dbMockData[dailyTotalPath].electricity_usage['.sv'].increment, 0, 'Electricity usage must not increment for historical packet');
+
+        console.log('✓ Test 2.12 passed.');
+    } catch (err) {
+        console.error('✗ Test 2.12 failed:', err);
+        process.exit(1);
+    }
+
     // Test 3: Machine status transition to OFF on idle
     try {
         console.log('Running test 3: Machine idle timeout status transition...');
