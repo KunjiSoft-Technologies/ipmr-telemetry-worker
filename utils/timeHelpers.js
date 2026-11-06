@@ -39,4 +39,27 @@ const secToTime = (time) => {
     return (new Date(time * 1000).toISOString().substr(11, 8).slice(0, -3));
 };
 
-module.exports = { getLocalMoment, getToday, whatHour, secToTime };
+const getHourWindow = (uid, day, hourNum, _unit) => {
+    const shiftStartSec = Number(_unit?.info?.shift_a_start || 25200);
+    const startSec = shiftStartSec + ((Number(hourNum) - 1) * 3600);
+    const endSec = shiftStartSec + (Number(hourNum) * 3600);
+    const startStr = secToTime(startSec);
+    const endStr = secToTime(endSec);
+
+    const startDayOffset = Math.floor(startSec / 86400);
+    const endDayOffset = Math.floor(endSec / 86400);
+    const tz = _unit?.info?.timezone || 'Asia/Karachi';
+    const startCalDay = moment.tz(day, tz).add(startDayOffset, 'days').format('YYYY-MM-DD');
+    const endCalDay = moment.tz(day, tz).add(endDayOffset, 'days').format('YYYY-MM-DD');
+
+    const startUnix = moment.tz(`${startCalDay} ${startStr}:00`, 'YYYY-MM-DD HH:mm:ss', tz).unix();
+    const endUnix = moment.tz(`${endCalDay} ${endStr}:00`, 'YYYY-MM-DD HH:mm:ss', tz).unix();
+    return { startUnix, endUnix, timeStr: `${startStr}-${endStr}` };
+};
+
+const isHourOffShift = (hourNum, _unit) => {
+    const shifts = Number(_unit?.info?.shifts || 3);
+    return hourNum > (shifts * 8);
+};
+
+module.exports = { getLocalMoment, getToday, whatHour, secToTime, getHourWindow, isHourOffShift };

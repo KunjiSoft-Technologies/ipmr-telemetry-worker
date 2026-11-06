@@ -1,6 +1,6 @@
 const admin = require('firebase-admin');
 const moment = require('moment-timezone');
-const { getToday, whatHour, secToTime } = require('../utils/timeHelpers');
+const { getToday, whatHour, secToTime, getHourWindow, isHourOffShift } = require('../utils/timeHelpers');
 const { toRange } = require('../utils/overlapHelpers');
 
 /**
@@ -212,6 +212,11 @@ async function turnOn(database, name, uid, unit, isEQ, at, unix, _unit) {
             );
             await database.ref(`users/${uid}/machines/${name}/machine_status`).set(true);
             await database.ref(`users/${uid}/machines/${name}/at`).set(at);
+            if (_unit.downtimeTrack && _unit.downtimeTrack[name]) {
+                await database.ref(`users/${uid}/downtime/${name}/${_unit.downtimeTrack[name]}/end`).set(unix).catch(() => null);
+                _unit.downtimeTrack[name] = null;
+                if (_unit.downtimeHour) _unit.downtimeHour[name] = null;
+            }
         }
     }
     return _unit;
@@ -332,29 +337,68 @@ async function countProduction(database, uid, unit, name, value, time, unix, _un
         }
     }
 
-    const monitorDowntime = !!machineObj["monitor-downtime"];
     const downtimeFunc = async () => {
         try {
-            if (!monitorDowntime) return;
-            let downtimeTrack = _unit.downtimeTrack;
-            if (downtimeTrack === undefined) {
-                const snap = await database.ref(`users/${uid}/downtime/${name}`).limitToLast(1).once("value");
-                const data = snap.val();
-                if (data !== null) {
-                    downtimeTrack = Object.keys(data)[0];
-                    if (Object.values(data)[0].end) downtimeTrack = null;
-                } else downtimeTrack = null;
+            if (!_unit.downtimeTrack || typeof _unit.downtimeTrack !== "object") {
+                _unit.downtimeTrack = {};
             }
+            if (!_unit.downtimeHour || typeof _unit.downtimeHour !== "object") {
+                _unit.downtimeHour = {};
+            }
+            const currentHour = whatHour(uid, unix, _unit);
+            let downtimeTrack = _unit.downtimeTrack[name];
+
+            if (downtimeTrack === undefined) {
+                const snap = await database.ref(`users/${uid}/downtime/${name}`).limitToLast(5).once("value").catch(() => null);
+                const data = snap ? snap.val() : null;
+                downtimeTrack = null;
+                if (data !== null) {
+                    const entries = Object.entries(data);
+                    for (let idx = entries.length - 1; idx >= 0; idx--) {
+                        const [k, v] = entries[idx];
+                        if (!v.end) {
+                            downtimeTrack = k;
+                            break;
+                        }
+                    }
+                }
+                _unit.downtimeTrack[name] = downtimeTrack;
+                _unit.downtimeHour[name] = currentHour;
+            }
+
+            // Rollover: If stoppage crossed an hour boundary, close previous chunk and start fresh chunk
+            if (downtimeTrack !== null && _unit.downtimeHour[name] && _unit.downtimeHour[name] !== currentHour) {
+                const prevHour = _unit.downtimeHour[name];
+                const prevToday = getToday(uid, unix - 3600, _unit);
+                const { endUnix: prevHourEnd } = getHourWindow(uid, prevToday, prevHour, _unit);
+                await database.ref(`users/${uid}/downtime/${name}/${downtimeTrack}/end`).set(prevHourEnd).catch(() => null);
+                _unit.downtimeTrack[name] = null;
+                downtimeTrack = null;
+            }
+
             if (downtimeTrack === null && offtime) {
-                const ref = await database.ref(`users/${uid}/downtime/${name}`).push({
-                    start: unix - offtime,
+                const { startUnix: hStart } = getHourWindow(uid, today, currentHour, _unit);
+                const chunkStart = Math.max(unix - offtime, hStart);
+                const isOff = isHourOffShift(currentHour, _unit);
+                const chunkData = {
+                    start: chunkStart,
                     end: null,
                     status: "IDLE"
-                });
-                _unit.downtimeTrack = ref.key;
+                };
+                if (isOff) {
+                    chunkData.reason = {
+                        category: "off-shift",
+                        scheduled: true,
+                        note: "Factory Off-Hours"
+                    };
+                }
+                const ref = await database.ref(`users/${uid}/downtime/${name}`).push(chunkData);
+                _unit.downtimeTrack[name] = ref.key;
+                _unit.downtimeHour[name] = currentHour;
             } else if (ontime && downtimeTrack !== null) {
-                await database.ref(`users/${uid}/downtime/${name}/${downtimeTrack}/end`).set(unix - ontime);
-                _unit.downtimeTrack = null;
+                await database.ref(`users/${uid}/downtime/${name}/${downtimeTrack}/end`).set(unix - ontime).catch(() => null);
+                _unit.downtimeTrack[name] = null;
+                _unit.downtimeHour[name] = null;
             }
         } catch (err) {
             console.log("ERROR IN downtimeFunc: " + err);
@@ -914,26 +958,66 @@ async function countElectricity(database, uid, unit, type, name, value, time, un
 
         const downtimeFunc = async () => {
             try {
-                if (!monitorDowntime) return;
-                let downtimeTrack = _unit.downtimeTrack;
-                if (downtimeTrack === undefined) {
-                    const snap = await database.ref(`users/${uid}/downtime/${name}`).limitToLast(1).once("value");
-                    const data = snap.val();
-                    if (data !== null) {
-                        downtimeTrack = Object.keys(data)[0];
-                        if (Object.values(data)[0].end) downtimeTrack = null;
-                    } else downtimeTrack = null;
+                if (!_unit.downtimeTrack || typeof _unit.downtimeTrack !== "object") {
+                    _unit.downtimeTrack = {};
                 }
+                if (!_unit.downtimeHour || typeof _unit.downtimeHour !== "object") {
+                    _unit.downtimeHour = {};
+                }
+                const currentHour = whatHour(uid, unix, _unit);
+                let downtimeTrack = _unit.downtimeTrack[name];
+
+                if (downtimeTrack === undefined) {
+                    const snap = await database.ref(`users/${uid}/downtime/${name}`).limitToLast(5).once("value").catch(() => null);
+                    const data = snap ? snap.val() : null;
+                    downtimeTrack = null;
+                    if (data !== null) {
+                        const entries = Object.entries(data);
+                        for (let idx = entries.length - 1; idx >= 0; idx--) {
+                            const [k, v] = entries[idx];
+                            if (!v.end) {
+                                downtimeTrack = k;
+                                break;
+                            }
+                        }
+                    }
+                    _unit.downtimeTrack[name] = downtimeTrack;
+                    _unit.downtimeHour[name] = currentHour;
+                }
+
+                // Rollover: If stoppage crossed an hour boundary, close previous chunk and start fresh chunk
+                if (downtimeTrack !== null && _unit.downtimeHour[name] && _unit.downtimeHour[name] !== currentHour) {
+                    const prevHour = _unit.downtimeHour[name];
+                    const prevToday = getToday(uid, unix - 3600, _unit);
+                    const { endUnix: prevHourEnd } = getHourWindow(uid, prevToday, prevHour, _unit);
+                    await database.ref(`users/${uid}/downtime/${name}/${downtimeTrack}/end`).set(prevHourEnd).catch(() => null);
+                    _unit.downtimeTrack[name] = null;
+                    downtimeTrack = null;
+                }
+
                 if (downtimeTrack === null && offtime) {
-                    const ref = await database.ref(`users/${uid}/downtime/${name}`).push({
-                        start: unix - offtime,
+                    const { startUnix: hStart } = getHourWindow(uid, today, currentHour, _unit);
+                    const chunkStart = Math.max(unix - offtime, hStart);
+                    const isOff = isHourOffShift(currentHour, _unit);
+                    const chunkData = {
+                        start: chunkStart,
                         end: null,
                         status: "IDLE"
-                    });
-                    _unit.downtimeTrack = ref.key;
+                    };
+                    if (isOff) {
+                        chunkData.reason = {
+                            category: "off-shift",
+                            scheduled: true,
+                            note: "Factory Off-Hours"
+                        };
+                    }
+                    const ref = await database.ref(`users/${uid}/downtime/${name}`).push(chunkData);
+                    _unit.downtimeTrack[name] = ref.key;
+                    _unit.downtimeHour[name] = currentHour;
                 } else if (ontime && downtimeTrack !== null) {
-                    await database.ref(`users/${uid}/downtime/${name}/${downtimeTrack}/end`).set(unix - ontime);
-                    _unit.downtimeTrack = null;
+                    await database.ref(`users/${uid}/downtime/${name}/${downtimeTrack}/end`).set(unix - ontime).catch(() => null);
+                    _unit.downtimeTrack[name] = null;
+                    _unit.downtimeHour[name] = null;
                 }
             } catch (err) {
                 console.log("ERROR IN downtimeFunc: " + err);

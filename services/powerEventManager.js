@@ -1,6 +1,6 @@
 const admin = require('firebase-admin');
 const moment = require('moment-timezone');
-const { getLocalMoment, getToday, whatHour, secToTime } = require('../utils/timeHelpers');
+const { getLocalMoment, getToday, whatHour, secToTime, getHourWindow, isHourOffShift } = require('../utils/timeHelpers');
 
 /**
  * Calculates and persists power-off sessions, machine downtime, and production target downtime.
@@ -38,17 +38,52 @@ async function calculateUnitOff(database, uid, unit, unit_off, unix, _unit) {
             for (const machineKey in _unit?.machines || {}) {
                 const machineObj = _unit.machines[machineKey];
                 const mold = machineObj.installedMold ? machineObj.installedMold.name : machineObj.mold_name;
-                const monitorDowntime = !!machineObj?.["monitor-downtime"];
+                const downtimeFunc = async () => {
+                    try {
+                        if (!_unit.downtimeTrack || typeof _unit.downtimeTrack !== "object") {
+                            _unit.downtimeTrack = {};
+                        }
+                        const openTrack = _unit.downtimeTrack[machineKey];
+                        if (openTrack) {
+                            await database.ref(`users/${uid}/downtime/${machineKey}/${openTrack}/end`).set(unit_off).catch(() => null);
+                            _unit.downtimeTrack[machineKey] = null;
+                        } else {
+                            const snap = await database.ref(`users/${uid}/downtime/${machineKey}`).limitToLast(3).once("value").catch(() => null);
+                            const data = snap ? snap.val() || {} : {};
+                            for (const [k, v] of Object.entries(data)) {
+                                if (!v.end) {
+                                    await database.ref(`users/${uid}/downtime/${machineKey}/${k}/end`).set(unit_off).catch(() => null);
+                                }
+                            }
+                        }
 
-                if (monitorDowntime) {
-                    machinePromises.push(
-                        database.ref(`users/${uid}/downtime/${machineKey}`).push({
-                            start: unit_off,
-                            end: unix,
-                            status: "OFF"
-                        }).catch(err => console.error("ERROR IN downtimeFunc: " + err))
-                    );
-                }
+                        // Chunk the outage hourly
+                        for (let h = startHour; h <= endHour; h++) {
+                            const { startUnix: hStart, endUnix: hEnd } = getHourWindow(uid, today, h, _unit);
+                            const chunkStart = Math.max(unit_off, hStart);
+                            const chunkEnd = Math.min(unix, hEnd);
+                            if (chunkEnd > chunkStart) {
+                                const isOff = isHourOffShift(h, _unit);
+                                const chunkData = {
+                                    start: chunkStart,
+                                    end: chunkEnd,
+                                    status: "OFF"
+                                };
+                                if (isOff) {
+                                    chunkData.reason = {
+                                        category: "off-shift",
+                                        scheduled: true,
+                                        note: "Factory Off-Hours"
+                                    };
+                                }
+                                await database.ref(`users/${uid}/downtime/${machineKey}`).push(chunkData);
+                            }
+                        }
+                    } catch (err) {
+                        console.error("ERROR IN downtimeFunc (sameDay): " + err);
+                    }
+                };
+                machinePromises.push(downtimeFunc());
 
                 if (mold && mold !== "NA") {
                     machinePromises.push(
@@ -179,17 +214,58 @@ async function calculateUnitOff(database, uid, unit, unit_off, unix, _unit) {
             for (const machineKey in _unit?.machines || {}) {
                 const machineObj = _unit.machines[machineKey];
                 const mold = machineObj.installedMold ? machineObj.installedMold.name : machineObj.mold_name;
-                const monitorDowntime = !!machineObj?.["monitor-downtime"];
+                const downtimeFunc = async () => {
+                    try {
+                        if (!_unit.downtimeTrack || typeof _unit.downtimeTrack !== "object") {
+                            _unit.downtimeTrack = {};
+                        }
+                        const openTrack = _unit.downtimeTrack[machineKey];
+                        if (openTrack) {
+                            await database.ref(`users/${uid}/downtime/${machineKey}/${openTrack}/end`).set(unit_off).catch(() => null);
+                            _unit.downtimeTrack[machineKey] = null;
+                        } else {
+                            const snap = await database.ref(`users/${uid}/downtime/${machineKey}`).limitToLast(3).once("value").catch(() => null);
+                            const data = snap ? snap.val() || {} : {};
+                            for (const [k, v] of Object.entries(data)) {
+                                if (!v.end) {
+                                    await database.ref(`users/${uid}/downtime/${machineKey}/${k}/end`).set(unit_off).catch(() => null);
+                                }
+                            }
+                        }
 
-                if (monitorDowntime) {
-                    machinePromises.push(
-                        database.ref(`users/${uid}/downtime/${machineKey}`).push({
-                            start: unit_off,
-                            end: unix,
-                            status: "OFF"
-                        }).catch(err => console.error("ERROR IN downtimeFunc: " + err))
-                    );
-                }
+                        // Chunk the outage hourly across days
+                        for (let d = 0; d <= daysDiff; d++) {
+                            const day = moment(startDay).add(d, "days").format("YYYY-MM-DD");
+                            const dStartHour = (d === 0 ? startHour : 1);
+                            const dEndHour = (d === daysDiff ? endHour : 24);
+
+                            for (let h = dStartHour; h <= dEndHour; h++) {
+                                const { startUnix: hStart, endUnix: hEnd } = getHourWindow(uid, day, h, _unit);
+                                const chunkStart = Math.max(unit_off, hStart);
+                                const chunkEnd = Math.min(unix, hEnd);
+                                if (chunkEnd > chunkStart) {
+                                    const isOff = isHourOffShift(h, _unit);
+                                    const chunkData = {
+                                        start: chunkStart,
+                                        end: chunkEnd,
+                                        status: "OFF"
+                                    };
+                                    if (isOff) {
+                                        chunkData.reason = {
+                                            category: "off-shift",
+                                            scheduled: true,
+                                            note: "Factory Off-Hours"
+                                        };
+                                    }
+                                    await database.ref(`users/${uid}/downtime/${machineKey}`).push(chunkData);
+                                }
+                            }
+                        }
+                    } catch (err) {
+                        console.error("ERROR IN downtimeFunc (multiDay): " + err);
+                    }
+                };
+                machinePromises.push(downtimeFunc());
 
                 if (mold && mold !== "NA") {
                     machinePromises.push(
