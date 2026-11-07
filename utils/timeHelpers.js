@@ -3,7 +3,7 @@ const moment = require('moment-timezone');
 const getLocalMoment = (unix, _unit) => {
     const tz = _unit?.info?.timezone || "Asia/Karachi";
     if (unix) {
-        return moment.unix(unix).utc();
+        return moment.unix(unix).tz(tz);
     } else {
         return moment().tz(tz);
     }
