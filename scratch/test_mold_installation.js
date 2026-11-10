@@ -157,6 +157,30 @@ async function runMoldTests() {
     assert.strictEqual(_unit.machinePendingData[machineId], undefined);
     console.log('✓ Test 4 passed: Immediate install succeeded with 0 RTDB read queries.');
 
+    // Test 5: Pending mold set in RTDB only (cache desynchronization recovery)
+    console.log('Test 5: Recovery when pending mold only exists in RTDB...');
+    const rtdbOnlyMold = {
+        installedMold: {
+            name: 'Bottle Mold 1L',
+            cavities: 1,
+            productName: 'Bottle 1L',
+            productColor: 'Blue',
+            materials: [{ name: 'PET', weight: 40 }]
+        },
+        mold_start_time: immediateUnix + 60
+    };
+    dbMockData[`users/${uid}/machines/${machineId}/pending_mold`] = rtdbOnlyMold;
+    // Ensure memory and cache have nothing
+    delete _unit.machinePendingData[machineId];
+    delete _unit.machines[machineId].pending_mold;
+
+    await checkAndInstallPendingMold(mockDb, uid, unit, machineId, immediateUnix + 60, _unit);
+
+    assert.strictEqual(dbMockData[`users/${uid}/machines/${machineId}`].installedMold.name, 'Bottle Mold 1L');
+    assert.strictEqual(_unit.machines[machineId].installedMold.name, 'Bottle Mold 1L');
+    assert.strictEqual(dbMockData[`users/${uid}/machines/${machineId}/pending_mold`], undefined);
+    console.log('✓ Test 5 passed: RTDB fallback successfully discovered and installed pending mold.');
+
     console.log('--- ALL MOLD INSTALLATION TESTS PASSED! ---');
 }
 
