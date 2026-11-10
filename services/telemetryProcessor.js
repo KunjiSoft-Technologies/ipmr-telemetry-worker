@@ -1737,20 +1737,6 @@ async function checkAndInstallPendingMold(database, uid, unit, machineId, unix, 
         _unit.machinePendingData[machineId] = pendingData;
     }
 
-    // Fallback: check RTDB if pending_mold exists
-    if (!pendingData) {
-        try {
-            const snap = await database.ref(`users/${uid}/machines/${machineId}/pending_mold`).once('value');
-            const rtdbPending = snap.val();
-            if (rtdbPending) {
-                pendingData = rtdbPending;
-                _unit.machinePendingData[machineId] = pendingData;
-            }
-        } catch (e) {
-            console.error(`Error checking pending_mold in RTDB for ${machineId}:`, e);
-        }
-    }
-
     // If pending mold exists and its scheduled start time has passed or arrived
     if (pendingData && pendingData.mold_start_time !== undefined && Number(pendingData.mold_start_time) <= unix) {
         console.log(`[PendingMold] Installing mold for machine ${machineId} (uid: ${uid}) at unix ${unix}. Mold:`, pendingData.installedMold?.name);
