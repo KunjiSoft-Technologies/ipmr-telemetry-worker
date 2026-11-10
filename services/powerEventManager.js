@@ -20,6 +20,7 @@ async function calculateUnitOff(database, uid, unit, unit_off, unix, _unit) {
         const startHour = whatHour(uid, unit_off, _unit);
         const endHour = whatHour(uid, unix, _unit);
         const sameDay = today === startDay;
+        const tz = _unit?.info?.timezone || "Asia/Karachi";
 
         if (sameDay) {
             const offDuration = unix - unit_off;
@@ -105,8 +106,8 @@ async function calculateUnitOff(database, uid, unit, unit_off, unix, _unit) {
                                 } else if (i === startHour) {
                                     // first hour
                                     const end = secToTime(Number(_unit.info?.shift_a_start || 0) + (Number(startHour) * 3600));
-                                    const endUnix = moment.utc(`${startDay} ${end}:00`, "YYYY-MM-DD HH:mm:ss").unix();
-                                    const downtime = endUnix - unit_off;
+                                    const endUnix = moment.tz(`${startDay} ${end}:00`, "YYYY-MM-DD HH:mm:ss", tz).unix();
+                                    const downtime = Math.max(0, endUnix - unit_off);
                                     if (hours[`${startDay}-${i}`]) {
                                         hours[`${startDay}-${i}`].downtime = (hours[`${startDay}-${i}`].downtime || 0) + downtime;
                                     } else {
@@ -119,8 +120,8 @@ async function calculateUnitOff(database, uid, unit, unit_off, unix, _unit) {
                                 } else if (i === endHour) {
                                     // last hour
                                     const start = secToTime(Number(_unit.info?.shift_a_start || 0) + ((Number(endHour) - 1) * 3600));
-                                    const startUnix = moment.utc(`${today} ${start}:00`, "YYYY-MM-DD HH:mm:ss").unix();
-                                    const downtime = unix - startUnix;
+                                    const startUnix = moment.tz(`${today} ${start}:00`, "YYYY-MM-DD HH:mm:ss", tz).unix();
+                                    const downtime = Math.max(0, unix - startUnix);
                                     if (hours[`${today}-${i}`]) {
                                         hours[`${today}-${i}`].downtime = (hours[`${today}-${i}`].downtime || 0) + downtime;
                                     } else {
@@ -161,25 +162,27 @@ async function calculateUnitOff(database, uid, unit, unit_off, unix, _unit) {
             const shiftStartSec = Number(_unit.info?.shift_a_start || 0);
 
             // from unit_off to day end
-            const firstDayoffTill = moment.utc(`${moment(startDay).add(1, "day").format("YYYY-MM-DD")} ${secToTime(shiftStartSec)}:00`, "YYYY-MM-DD HH:mm:ss").unix();
-            const firstDayOffDuration = firstDayoffTill - unit_off;
-            promises.push(
-                database.ref(`users/${uid}/reports/factory/daily/${startDay}/unit_power/${unit}/sessions`).push({
-                    off: unit_off,
-                    on: firstDayoffTill
-                })
-            );
-            promises.push(
-                database.ref(`users/${uid}/reports/factory/daily/${startDay}/unit_power/${unit}/total`).set(
-                    admin.database.ServerValue.increment(firstDayOffDuration)
-                )
-            );
+            const firstDayoffTill = moment.tz(`${moment.tz(startDay, tz).add(1, "day").format("YYYY-MM-DD")} ${secToTime(shiftStartSec)}:00`, "YYYY-MM-DD HH:mm:ss", tz).unix();
+            const firstDayOffDuration = Math.max(0, firstDayoffTill - unit_off);
+            if (firstDayoffTill > unit_off) {
+                promises.push(
+                    database.ref(`users/${uid}/reports/factory/daily/${startDay}/unit_power/${unit}/sessions`).push({
+                        off: unit_off,
+                        on: firstDayoffTill
+                    })
+                );
+                promises.push(
+                    database.ref(`users/${uid}/reports/factory/daily/${startDay}/unit_power/${unit}/total`).set(
+                        admin.database.ServerValue.increment(firstDayOffDuration)
+                    )
+                );
+            }
 
             // in between days if outage spanned multiple days
-            const daysDiff = moment(today).diff(moment(startDay), 'days');
+            const daysDiff = moment.tz(today, tz).diff(moment.tz(startDay, tz), 'days');
             for (let d = 1; d < daysDiff; d++) {
-                const midDay = moment(startDay).add(d, 'days').format('YYYY-MM-DD');
-                const midDayStart = moment.utc(`${midDay} ${secToTime(shiftStartSec)}:00`, "YYYY-MM-DD HH:mm:ss").unix();
+                const midDay = moment.tz(startDay, tz).add(d, 'days').format('YYYY-MM-DD');
+                const midDayStart = moment.tz(`${midDay} ${secToTime(shiftStartSec)}:00`, "YYYY-MM-DD HH:mm:ss", tz).unix();
                 const midDayEnd = midDayStart + 86400;
                 promises.push(
                     database.ref(`users/${uid}/reports/factory/daily/${midDay}/unit_power/${unit}/sessions`).push({
@@ -195,19 +198,21 @@ async function calculateUnitOff(database, uid, unit, unit_off, unix, _unit) {
             }
 
             // second day
-            const secondDayStartFrom = moment.utc(`${today} ${secToTime(shiftStartSec)}:00`, "YYYY-MM-DD HH:mm:ss").unix();
-            const secondDayOffDuration = unix - secondDayStartFrom;
-            promises.push(
-                database.ref(`users/${uid}/reports/factory/daily/${today}/unit_power/${unit}/sessions`).push({
-                    off: secondDayStartFrom,
-                    on: unix
-                })
-            );
-            promises.push(
-                database.ref(`users/${uid}/reports/factory/daily/${today}/unit_power/${unit}/total`).set(
-                    admin.database.ServerValue.increment(secondDayOffDuration)
-                )
-            );
+            const secondDayStartFrom = moment.tz(`${today} ${secToTime(shiftStartSec)}:00`, "YYYY-MM-DD HH:mm:ss", tz).unix();
+            const secondDayOffDuration = Math.max(0, unix - secondDayStartFrom);
+            if (unix > secondDayStartFrom) {
+                promises.push(
+                    database.ref(`users/${uid}/reports/factory/daily/${today}/unit_power/${unit}/sessions`).push({
+                        off: secondDayStartFrom,
+                        on: unix
+                    })
+                );
+                promises.push(
+                    database.ref(`users/${uid}/reports/factory/daily/${today}/unit_power/${unit}/total`).set(
+                        admin.database.ServerValue.increment(secondDayOffDuration)
+                    )
+                );
+            }
             await Promise.all(promises);
 
             const machinePromises = [];
@@ -277,8 +282,8 @@ async function calculateUnitOff(database, uid, unit, unit_off, unix, _unit) {
                                     if (i === 0 && j === startHour) {
                                         // first day first hour
                                         const end = secToTime(shiftStartSec + (Number(startHour) * 3600));
-                                        const endUnix = moment.utc(`${startDay} ${end}:00`, "YYYY-MM-DD HH:mm:ss").unix();
-                                        const downtime = endUnix - unit_off;
+                                        const endUnix = moment.tz(`${startDay} ${end}:00`, "YYYY-MM-DD HH:mm:ss", tz).unix();
+                                        const downtime = Math.max(0, endUnix - unit_off);
                                         if (hours[`${startDay}-${j}`]) {
                                             hours[`${startDay}-${j}`].downtime = (hours[`${startDay}-${j}`].downtime || 0) + downtime;
                                         } else {
@@ -291,8 +296,8 @@ async function calculateUnitOff(database, uid, unit, unit_off, unix, _unit) {
                                     } else if (i === daysDiff && j === endHour) {
                                         // last day last hour
                                         const start = secToTime(shiftStartSec + ((Number(endHour) - 1) * 3600));
-                                        const startUnix = moment.utc(`${today} ${start}:00`, "YYYY-MM-DD HH:mm:ss").unix();
-                                        const downtime = unix - startUnix;
+                                        const startUnix = moment.tz(`${today} ${start}:00`, "YYYY-MM-DD HH:mm:ss", tz).unix();
+                                        const downtime = Math.max(0, unix - startUnix);
                                         if (hours[`${today}-${j}`]) {
                                             hours[`${today}-${j}`].downtime = (hours[`${today}-${j}`].downtime || 0) + downtime;
                                         } else {
@@ -332,16 +337,16 @@ async function calculateUnitOff(database, uid, unit, unit_off, unix, _unit) {
                             let duration = 0;
                             if (month === startMonth) {
                                 const start = unit_off;
-                                const end = moment.utc(startDay).add(1, "month").startOf("month").unix() + shiftStartSec;
-                                duration = end - start;
+                                const end = moment.tz(startDay, tz).add(1, "month").startOf("month").unix() + shiftStartSec;
+                                duration = Math.max(0, end - start);
                             } else if (month === endMonth) {
-                                const start = moment.utc(today).startOf("month").unix() + shiftStartSec;
+                                const start = moment.tz(today, tz).startOf("month").unix() + shiftStartSec;
                                 const end = unix;
-                                duration = end - start;
+                                duration = Math.max(0, end - start);
                             } else {
-                                const curMonthStart = moment.utc(startDay).add(m, "month").startOf("month").unix();
-                                const curMonthEnd = moment.utc(startDay).add(m, "month").endOf("month").unix();
-                                duration = curMonthEnd - curMonthStart;
+                                const curMonthStart = moment.tz(startDay, tz).add(m, "month").startOf("month").unix();
+                                const curMonthEnd = moment.tz(startDay, tz).add(m, "month").endOf("month").unix();
+                                duration = Math.max(0, curMonthEnd - curMonthStart);
                             }
                             if (duration > 0) {
                                 machinePromises.push(

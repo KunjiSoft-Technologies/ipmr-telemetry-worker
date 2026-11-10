@@ -1,6 +1,6 @@
 const admin = require('firebase-admin');
 const moment = require('moment-timezone');
-const { getToday, whatHour, secToTime, getHourWindow, isHourOffShift } = require('../utils/timeHelpers');
+const { getLocalMoment, getToday, whatHour, secToTime, getHourWindow, isHourOffShift } = require('../utils/timeHelpers');
 const { toRange } = require('../utils/overlapHelpers');
 
 /**
@@ -550,7 +550,7 @@ async function countProduction(database, uid, unit, name, value, time, unix, _un
         }
     }
 
-    const datetime = moment.unix(unix).utc();
+    const datetime = getLocalMoment(unix, _unit);
     let sec = (datetime.hours() * 3600) + datetime.minutes() * 60 + datetime.seconds();
     let hoursx = sec <= (Number(_unit.info.shift_a_start || 0) + 59) ? 24 + datetime.hours() : datetime.hours();
     const seconds = (hoursx * 3600) + datetime.minutes() * 60 + datetime.seconds();
@@ -769,7 +769,7 @@ async function countElectricity(database, uid, unit, type, name, value, time, un
             }
         }
 
-        const datetime = moment.unix(unix).utc();
+        const datetime = getLocalMoment(unix, _unit);
         let sec = (datetime.hours() * 3600) + datetime.minutes() * 60 + datetime.seconds();
         let hoursx = sec <= (Number(_unit.info.shift_a_start || 0) + 59) ? 24 + datetime.hours() : datetime.hours();
         const seconds = (hoursx * 3600) + datetime.minutes() * 60 + datetime.seconds();
@@ -1057,7 +1057,7 @@ async function countElectricity(database, uid, unit, type, name, value, time, un
             }
         }
 
-        const datetime = moment.unix(unix).utc();
+        const datetime = getLocalMoment(unix, _unit);
         let sec = (datetime.hours() * 3600) + datetime.minutes() * 60 + datetime.seconds();
         let hoursx = sec <= (Number(_unit.info.shift_a_start || 0) + 59) ? 24 + datetime.hours() : datetime.hours();
         const seconds = (hoursx * 3600) + datetime.minutes() * 60 + datetime.seconds();
@@ -1243,7 +1243,7 @@ async function ensureHourlyReportKey(database, uid, type, id, today, unix, _unit
     
     // If not found in RTDB, we need to create/initialize the first segment (key: 0)
     const key = 0;
-    const datetime = moment.unix(unix).utc();
+    const datetime = getLocalMoment(unix, _unit);
     const sec = (datetime.hours() * 3600) + datetime.minutes() * 60 + datetime.seconds();
     const hoursx = sec <= (Number(_unit.info.shift_a_start || 0) + 59) ? 24 + datetime.hours() : datetime.hours();
     const seconds = (hoursx * 3600) + datetime.minutes() * 60 + datetime.seconds();
@@ -1870,14 +1870,14 @@ async function processDigitalValues(database, uid, unit, type, id, digital_value
                 if (target.timer >= idleTimeSet * 60) {
                     _unit.machines[id].machine_status = false;
                     target.timer = 0;
-                    await turnOff(database, id, uid, unit, false, moment.unix(unix).utc().format('YYYY-MM-DD HH:mm:ss'), unix, _unit);
+                    await turnOff(database, id, uid, unit, false, getLocalMoment(unix, _unit).format('YYYY-MM-DD HH:mm:ss'), unix, _unit);
                 }
             }
         } else {
             target.timer = 0;
             if (!_unit.machines?.[id]?.machine_status) {
                 _unit.machines[id].machine_status = true;
-                await turnOn(database, id, uid, unit, false, moment.unix(unix).utc().format('YYYY-MM-DD HH:mm:ss'), unix, _unit);
+                await turnOn(database, id, uid, unit, false, getLocalMoment(unix, _unit).format('YYYY-MM-DD HH:mm:ss'), unix, _unit);
             }
         }
 
