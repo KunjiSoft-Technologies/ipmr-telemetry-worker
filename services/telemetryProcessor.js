@@ -7,7 +7,11 @@ const { toRange } = require('../utils/overlapHelpers');
  * Checks for replay/duplicate packets.
  * @returns {Promise<boolean>} - True if it is a duplicate and we should abort.
  */
-async function checkDuplicate(database, uid, unit, unix, _unit, redis, saveUnitToCache, remaining = null) {
+async function checkDuplicate(database, uid, unit, unix, _unit, redis, saveUnitToCache, remaining = null, isReplay = false) {
+    if (isReplay) {
+        return false;
+    }
+
     if (redis) {
         try {
             const lockKey = `packet_lock:${uid}:${unit}:${unix}`;
@@ -51,7 +55,7 @@ async function updatePacketState(database, uid, unit, unix, _unit) {
 /**
  * Performs packet sequencing verification.
  */
-async function verifySequence(database, uid, unit, payload, _unit) {
+async function verifySequence(database, uid, unit, payload, _unit, isReplay = false) {
     const packet_id_new = payload.packet_id;
     if (packet_id_new === undefined || packet_id_new === null) return;
 
@@ -64,7 +68,7 @@ async function verifySequence(database, uid, unit, payload, _unit) {
         expectedPacketID = packet_id_new;
     }
 
-    if (packet_id_new !== expectedPacketID) {
+    if (!isReplay && packet_id_new !== expectedPacketID) {
         // Log error to /users/${uid}/packetIDErrors/units/${unit}/
         await database.ref(`/users/${uid}/packetIDErrors/units/${unit}/`).push({
             expected: expectedPacketID,

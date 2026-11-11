@@ -15,6 +15,11 @@ const { getLocalMoment, getToday, whatHour, secToTime, getHourWindow, isHourOffS
  */
 async function calculateUnitOff(database, uid, unit, unit_off, unix, _unit) {
     try {
+        if (!unix || !unit_off || unix <= unit_off) {
+            console.warn(`[calculateUnitOff] Invalid outage timestamps for unit ${unit}: unit_off=${unit_off}, unix=${unix}. Skipping.`);
+            return;
+        }
+
         const today = getToday(uid, unix, _unit);
         const startDay = getToday(uid, unit_off, _unit);
         const startHour = whatHour(uid, unit_off, _unit);
@@ -22,7 +27,8 @@ async function calculateUnitOff(database, uid, unit, unit_off, unix, _unit) {
         const sameDay = today === startDay;
 
         if (sameDay) {
-            const offDuration = unix - unit_off;
+            const offDuration = Math.max(0, unix - unit_off);
+            if (offDuration <= 0) return;
             const promises = [
                 database.ref(`users/${uid}/reports/factory/daily/${today}/unit_power/${unit}/sessions`).push({
                     off: unit_off,
@@ -162,18 +168,20 @@ async function calculateUnitOff(database, uid, unit, unit_off, unix, _unit) {
 
             // from unit_off to day end
             const firstDayoffTill = moment.utc(`${moment(startDay).add(1, "day").format("YYYY-MM-DD")} ${secToTime(shiftStartSec)}:00`, "YYYY-MM-DD HH:mm:ss").unix();
-            const firstDayOffDuration = firstDayoffTill - unit_off;
-            promises.push(
-                database.ref(`users/${uid}/reports/factory/daily/${startDay}/unit_power/${unit}/sessions`).push({
-                    off: unit_off,
-                    on: firstDayoffTill
-                })
-            );
-            promises.push(
-                database.ref(`users/${uid}/reports/factory/daily/${startDay}/unit_power/${unit}/total`).set(
-                    admin.database.ServerValue.increment(firstDayOffDuration)
-                )
-            );
+            const firstDayOffDuration = Math.max(0, firstDayoffTill - unit_off);
+            if (firstDayOffDuration > 0 && firstDayoffTill > unit_off) {
+                promises.push(
+                    database.ref(`users/${uid}/reports/factory/daily/${startDay}/unit_power/${unit}/sessions`).push({
+                        off: unit_off,
+                        on: firstDayoffTill
+                    })
+                );
+                promises.push(
+                    database.ref(`users/${uid}/reports/factory/daily/${startDay}/unit_power/${unit}/total`).set(
+                        admin.database.ServerValue.increment(firstDayOffDuration)
+                    )
+                );
+            }
 
             // in between days if outage spanned multiple days
             const daysDiff = moment(today).diff(moment(startDay), 'days');
@@ -196,18 +204,20 @@ async function calculateUnitOff(database, uid, unit, unit_off, unix, _unit) {
 
             // second day
             const secondDayStartFrom = moment.utc(`${today} ${secToTime(shiftStartSec)}:00`, "YYYY-MM-DD HH:mm:ss").unix();
-            const secondDayOffDuration = unix - secondDayStartFrom;
-            promises.push(
-                database.ref(`users/${uid}/reports/factory/daily/${today}/unit_power/${unit}/sessions`).push({
-                    off: secondDayStartFrom,
-                    on: unix
-                })
-            );
-            promises.push(
-                database.ref(`users/${uid}/reports/factory/daily/${today}/unit_power/${unit}/total`).set(
-                    admin.database.ServerValue.increment(secondDayOffDuration)
-                )
-            );
+            const secondDayOffDuration = Math.max(0, unix - secondDayStartFrom);
+            if (secondDayOffDuration > 0 && unix > secondDayStartFrom) {
+                promises.push(
+                    database.ref(`users/${uid}/reports/factory/daily/${today}/unit_power/${unit}/sessions`).push({
+                        off: secondDayStartFrom,
+                        on: unix
+                    })
+                );
+                promises.push(
+                    database.ref(`users/${uid}/reports/factory/daily/${today}/unit_power/${unit}/total`).set(
+                        admin.database.ServerValue.increment(secondDayOffDuration)
+                    )
+                );
+            }
             await Promise.all(promises);
 
             const machinePromises = [];

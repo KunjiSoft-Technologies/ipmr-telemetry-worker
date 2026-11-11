@@ -56,6 +56,22 @@ async function handleMessage(message) {
         return;
     }
 
+    const isReplay = attributes.is_replay === 'true' || attributes.is_replay === true || rawPayload.is_replay === true;
+    const isLastReplayPacket = attributes.is_last_replay_packet === 'true' || attributes.is_last_replay_packet === true || rawPayload.is_last_replay_packet === true;
+    const replayLockKey = `replay_active:${mac}`;
+
+    // If unit is currently undergoing replay and this is a live field message, keep it unACKed
+    try {
+        const replayActive = await redis.get(replayLockKey);
+        if (replayActive && !isReplay) {
+            console.log(`[Replay Active] MAC ${mac} is currently undergoing a replay/restore session. NACKing live message to hold unACKed in Pub/Sub.`);
+            message.nack();
+            return;
+        }
+    } catch (rErr) {
+        console.error(`Error checking replay active lock in Redis for ${mac}:`, rErr);
+    }
+
     let payload = {};
     let remaining = null;
     let unix = unixStr ? Number(unixStr) : Math.floor(Date.now() / 1000);
@@ -116,7 +132,7 @@ async function handleMessage(message) {
         unitLockAcquired = true;
 
         // 4. Perform duplicate packet checking
-        const isDuplicate = await checkDuplicate(database, uid, unit, unix, _unit, redis, saveUnitToCache, remaining);
+        const isDuplicate = await checkDuplicate(database, uid, unit, unix, _unit, redis, saveUnitToCache, remaining, isReplay);
         if (isDuplicate) {
             console.log(`Duplicate/late packet received for MAC ${mac} (unix: ${unix}). Acknowledging and skipping.`);
             message.ack();
@@ -124,7 +140,7 @@ async function handleMessage(message) {
         }
 
         // 5. Perform packet ID sequencing check
-        await verifySequence(database, uid, unit, payload, _unit);
+        await verifySequence(database, uid, unit, payload, _unit, isReplay);
 
         // 5.0 Check and install pending mold if applicable
         if (connection && connection.type === 'machines' && connection.id) {
@@ -237,9 +253,9 @@ async function handleMessage(message) {
             }
         }
 
-        // 9. Evaluate alerts safely (failure here should not abort report saving)
+        // 9. Evaluate alerts safely (suppressed during replay to avoid alert spam)
         const isVoltageBelowThreshold = checkVoltageBelowThreshold(payload.phase_values);
-        if (connection && connection.type && connection.id && !isVoltageBelowThreshold) {
+        if (!isReplay && connection && connection.type && connection.id && !isVoltageBelowThreshold) {
             try {
                 await processAlerts(uid, unit, connection.type, connection.id, unix, payload, redis, database, _unit);
             } catch (alertErr) {
@@ -250,37 +266,49 @@ async function handleMessage(message) {
         // 9.1 Update packet state in RTDB & cache ONLY AFTER successful statistical processing
         await updatePacketState(database, uid, unit, unix, _unit);
 
-        // 10. Write telemetry record to InfluxDB
+        // 10. Write telemetry record to InfluxDB (skipped during replay to prevent duplication)
         const realtime = !_unit.uploadingPrev?.status;
         const values = payload.values || { "60_a": 0 };
         const now_values = payload.now_values || {};
         const active_alerts = _unit.active_alerts_count || 0;
 
-        await writeInfluxRecord(uid, unit, mac, {
-            ...payload,
-            success,
-            realtime,
-            values,
-            now_values,
-            phase_values: payload.phase_values || {},
-            digital_values: payload.digital_values || {},
-            unix,
-            temperature,
-            active_alerts
-        });
+        if (!isReplay) {
+            await writeInfluxRecord(uid, unit, mac, {
+                ...payload,
+                success,
+                realtime,
+                values,
+                now_values,
+                phase_values: payload.phase_values || {},
+                digital_values: payload.digital_values || {},
+                unix,
+                temperature,
+                active_alerts
+            });
+        }
 
         // 11. Save the updated _unit back in Redis cache
         await saveUnitToCache(uid, unit, _unit);
 
+        // If this was the last replayed packet, release the replay lock in Redis
+        if (isLastReplayPacket) {
+            try {
+                await redis.del(replayLockKey);
+                console.log(`[Replay Complete] Released replay lock for MAC ${mac}. Live telemetry processing will now resume.`);
+            } catch (rDelErr) {
+                console.error(`Error clearing replay lock for ${mac}:`, rDelErr);
+            }
+        }
+
         // 12. Acknowledge message
         message.ack();
-        console.log(`Successfully processed packet for MAC ${mac} (uid: ${uid}, unit: ${unit}) at unix ${unix}`);
+        console.log(`Successfully processed packet for MAC ${mac} (uid: ${uid}, unit: ${unit}) at unix ${unix}${isReplay ? ' [REPLAY]' : ''}`);
     } catch (error) {
         console.error(`Error processing packet for MAC ${mac}:`, error);
         success = false;
 
-        // Attempt to write failure record to InfluxDB if uid and unit were resolved
-        if (uid && unit) {
+        // Attempt to write failure record to InfluxDB if uid and unit were resolved (and not in replay)
+        if (!isReplay && uid && unit) {
             try {
                 const realtime = _unit ? !_unit.uploadingPrev?.status : true;
                 const values = payload.values || { "60_a": 0 };
