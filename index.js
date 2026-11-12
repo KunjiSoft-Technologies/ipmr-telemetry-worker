@@ -105,7 +105,7 @@ async function handleMessage(message) {
     let connection = null;
     let _unit = null;
     let unitLockAcquired = false;
-    const unitLockKey = `unit_lock:${mac}`;
+    let unitLockKey = null;
 
     try {
         // 3. Check and load/initialize the _unit object
@@ -122,10 +122,11 @@ async function handleMessage(message) {
         const inputs = lookupResult.inputs || (_unit && _unit.connection && _unit.connection.inputs) || null;
         _unit = lookupResult._unit;
 
-        // 3.1 Acquire unit processing lock to prevent concurrent processing for the same MAC
+        // 3.1 Acquire unit processing lock by UID:UNIT to prevent concurrent processing with REST API
+        unitLockKey = `unit_lock:${uid}:${unit}`;
         const acquired = await redis.set(unitLockKey, 'in_use', 'NX', 'EX', 15);
         if (!acquired) {
-            console.log(`[Lock Conflict] MAC ${mac} is currently locked by another process. Nacking message for redelivery.`);
+            console.log(`[Lock Conflict] Unit ${uid}-${unit} (MAC ${mac}) is currently locked by another process. Nacking message for redelivery.`);
             message.nack();
             return;
         }
@@ -142,20 +143,21 @@ async function handleMessage(message) {
         // 5. Perform packet ID sequencing check
         await verifySequence(database, uid, unit, payload, _unit, isReplay);
 
-        // 5.0 Check and install pending mold if applicable
+        // 5.0 Check and install pending mold if applicable across all associated machines
+        const machineIdsToCheck = new Set();
         if (connection && connection.type === 'machines' && connection.id) {
-            try {
-                await checkAndInstallPendingMold(database, uid, unit, connection.id, unix, _unit);
-            } catch (moldErr) {
-                console.error(`Error checking/installing pending mold for MAC ${mac} (machine: ${connection.id}):`, moldErr);
-            }
-        } else if (_unit.machines && Object.keys(_unit.machines).length > 0) {
+            machineIdsToCheck.add(connection.id);
+        }
+        if (_unit.machines) {
             for (const mId of Object.keys(_unit.machines)) {
-                try {
-                    await checkAndInstallPendingMold(database, uid, unit, mId, unix, _unit);
-                } catch (moldErr) {
-                    console.error(`Error checking/installing pending mold for MAC ${mac} (machine: ${mId}):`, moldErr);
-                }
+                machineIdsToCheck.add(mId);
+            }
+        }
+        for (const mId of machineIdsToCheck) {
+            try {
+                await checkAndInstallPendingMold(database, uid, unit, mId, unix, _unit, redis);
+            } catch (moldErr) {
+                console.error(`Error checking/installing pending mold for MAC ${mac} (machine: ${mId}):`, moldErr);
             }
         }
 
@@ -242,7 +244,7 @@ async function handleMessage(message) {
             }
             if (connection.type === 'machines' || payload.digital_values) {
                 try {
-                    await processDigitalValues(database, uid, unit, connection.type, connection.id, payload.digital_values || {}, unix, _unit, inputs);
+                    await processDigitalValues(database, uid, unit, connection.type, connection.id, payload.digital_values || {}, unix, _unit, inputs, redis);
                 } catch (digitalErr) {
                     console.error(`Error processing digital values for ${connection.type}/${connection.id}:`, digitalErr);
                 }

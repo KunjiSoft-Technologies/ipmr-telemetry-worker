@@ -144,7 +144,6 @@ async function pushActivity(database, uid, unix, name, title, status, state) {
 async function turnOff(database, name, uid, unit, isEQ, at, unix, _unit) {
     if (isEQ) {
         if (_unit.equipments[name]) {
-            _unit.equipments[name].status = false;
             await pushActivity(
                 database,
                 uid,
@@ -154,8 +153,11 @@ async function turnOff(database, name, uid, unit, isEQ, at, unix, _unit) {
                 "ERROR",
                 "OFF"
             );
-            await database.ref(`users/${uid}/equipments/${name}/status`).set(false);
-            await database.ref(`users/${uid}/equipments/${name}/at`).set(at);
+            await database.ref(`users/${uid}/equipments/${name}`).update({
+                status: false,
+                at: at
+            });
+            _unit.equipments[name].status = false;
             const today = getToday(uid, unix, _unit);
             const snap = await database.ref(`users/${uid}/reports/equipments/${name}/daily/${today}/total_sessions`).get();
             if (!snap.exists()) {
@@ -164,7 +166,6 @@ async function turnOff(database, name, uid, unit, isEQ, at, unix, _unit) {
         }
     } else {
         if (_unit.machines[name]) {
-            _unit.machines[name].machine_status = false;
             await pushActivity(
                 database,
                 uid,
@@ -174,8 +175,11 @@ async function turnOff(database, name, uid, unit, isEQ, at, unix, _unit) {
                 "ERROR",
                 "NOT IN PRODUCTION"
             );
-            await database.ref(`users/${uid}/machines/${name}/machine_status`).set(false);
-            await database.ref(`users/${uid}/machines/${name}/at`).set(at);
+            await database.ref(`users/${uid}/machines/${name}`).update({
+                machine_status: false,
+                at: at
+            });
+            _unit.machines[name].machine_status = false;
         }
     }
     return _unit;
@@ -187,7 +191,6 @@ async function turnOff(database, name, uid, unit, isEQ, at, unix, _unit) {
 async function turnOn(database, name, uid, unit, isEQ, at, unix, _unit) {
     if (isEQ) {
         if (_unit.equipments[name]) {
-            _unit.equipments[name].status = true;
             await pushActivity(
                 database,
                 uid,
@@ -197,14 +200,16 @@ async function turnOn(database, name, uid, unit, isEQ, at, unix, _unit) {
                 "OK",
                 "ON"
             );
-            await database.ref(`users/${uid}/equipments/${name}/status`).set(true);
-            await database.ref(`users/${uid}/equipments/${name}/at`).set(at);
+            await database.ref(`users/${uid}/equipments/${name}`).update({
+                status: true,
+                at: at
+            });
+            _unit.equipments[name].status = true;
             const today = getToday(uid, unix, _unit);
             await database.ref(`users/${uid}/reports/equipments/${name}/daily/${today}/total_sessions`).set(admin.database.ServerValue.increment(1));
         }
     } else {
         if (_unit.machines[name]) {
-            _unit.machines[name].machine_status = true;
             await pushActivity(
                 database,
                 uid,
@@ -214,13 +219,16 @@ async function turnOn(database, name, uid, unit, isEQ, at, unix, _unit) {
                 "OK",
                 "IN PRODUCTION"
             );
-            await database.ref(`users/${uid}/machines/${name}/machine_status`).set(true);
-            await database.ref(`users/${uid}/machines/${name}/at`).set(at);
+            await database.ref(`users/${uid}/machines/${name}`).update({
+                machine_status: true,
+                at: at
+            });
             if (_unit.downtimeTrack && _unit.downtimeTrack[name]) {
                 await database.ref(`users/${uid}/downtime/${name}/${_unit.downtimeTrack[name]}/end`).set(unix).catch(() => null);
                 _unit.downtimeTrack[name] = null;
                 if (_unit.downtimeHour) _unit.downtimeHour[name] = null;
             }
+            _unit.machines[name].machine_status = true;
         }
     }
     return _unit;
@@ -1727,22 +1735,67 @@ async function processPhaseValues(database, uid, unit, type, id, phase_values, u
  * @param {string} machineId - Machine ID/key
  * @param {number} unix - Current packet unix timestamp
  * @param {Object} _unit - In-memory / cached unit object
+ * @param {Object} [redis] - Redis client instance
  */
-async function checkAndInstallPendingMold(database, uid, unit, machineId, unix, _unit) {
+async function checkAndInstallPendingMold(database, uid, unit, machineId, unix, _unit, redis = null) {
     if (!machineId || !_unit) return;
 
     if (!_unit.machinePendingData) _unit.machinePendingData = {};
 
     let pendingData = _unit.machinePendingData[machineId];
 
-    // Fallback: check in-memory machine object if it has pending_mold
+    // Fallback 1: check in-memory machine object if it has pending_mold
     if (!pendingData && _unit.machines?.[machineId]?.pending_mold) {
         pendingData = _unit.machines[machineId].pending_mold;
         _unit.machinePendingData[machineId] = pendingData;
     }
 
-    // If pending mold exists and its scheduled start time has passed or arrived
-    if (pendingData && pendingData.mold_start_time !== undefined && Number(pendingData.mold_start_time) <= unix) {
+    // Fallback 2: check dedicated Redis key (survives any unit cache overwrite)
+    if (!pendingData && redis) {
+        try {
+            const dedicatedRaw = await redis.get(`pending_mold:${uid}:${machineId}`);
+            if (dedicatedRaw) {
+                pendingData = JSON.parse(dedicatedRaw);
+                _unit.machinePendingData[machineId] = pendingData;
+            }
+        } catch (e) {
+            console.error(`Error checking dedicated pending mold key in Redis for ${machineId}:`, e);
+        }
+    }
+
+    // Fallback 3: check RTDB if the pending mold flag is set (0 RTDB reads during normal operation)
+    if (!pendingData && redis) {
+        try {
+            const hasPending = await redis.get(`has_pending_mold:${uid}:${unit}`);
+            if (hasPending === '1') {
+                const snap = await database.ref(`users/${uid}/machines/${machineId}/pending_mold`).once('value');
+                if (snap.exists()) {
+                    pendingData = snap.val();
+                    _unit.machinePendingData[machineId] = pendingData;
+                }
+            }
+        } catch (e) {
+            console.error(`Error checking pending_mold in RTDB via flag for ${machineId}:`, e);
+        }
+    }
+
+    // Fallback 4: direct RTDB check if redis is not supplied (e.g. tests or standalone)
+    if (!pendingData && !redis) {
+        try {
+            const snap = await database.ref(`users/${uid}/machines/${machineId}/pending_mold`).once('value');
+            if (snap.exists()) {
+                pendingData = snap.val();
+                _unit.machinePendingData[machineId] = pendingData;
+            }
+        } catch (e) {
+            // Ignore in offline/mock mode
+        }
+    }
+
+    const effectiveUnix = (unix && Number(unix) > 0) ? Number(unix) : Math.floor(Date.now() / 1000);
+
+    // If pending mold exists and its scheduled start time has passed or arrived (with 120s tolerance for clock drift)
+    if (pendingData && pendingData.mold_start_time !== undefined && Number(pendingData.mold_start_time) <= (effectiveUnix + 120)) {
         console.log(`[PendingMold] Installing mold for machine ${machineId} (uid: ${uid}) at unix ${unix}. Mold:`, pendingData.installedMold?.name);
         try {
             const updates = {
@@ -1758,7 +1811,19 @@ async function checkAndInstallPendingMold(database, uid, unit, machineId, unix, 
             // 2. Remove pending_mold from RTDB
             await database.ref(`users/${uid}/machines/${machineId}/pending_mold`).remove();
 
-            // 3. Update in-memory machine object
+            // 3. Clear dedicated Redis keys if redis is provided
+            if (redis) {
+                try {
+                    await Promise.all([
+                        redis.del(`pending_mold:${uid}:${machineId}`),
+                        redis.del(`has_pending_mold:${uid}:${unit}`)
+                    ]);
+                } catch (rErr) {
+                    console.error(`Error cleaning up Redis pending mold keys for ${machineId}:`, rErr);
+                }
+            }
+
+            // 4. Update in-memory machine object
             if (_unit.machines?.[machineId]) {
                 Object.keys(updates).forEach(key => {
                     _unit.machines[machineId][key] = updates[key];
@@ -1766,7 +1831,7 @@ async function checkAndInstallPendingMold(database, uid, unit, machineId, unix, 
                 delete _unit.machines[machineId].pending_mold;
             }
 
-            // 4. Clean up pendingData
+            // 5. Clean up pendingData
             delete _unit.machinePendingData[machineId];
 
             console.log(`[PendingMold] Successfully installed mold ${pendingData.installedMold?.name} for machine ${machineId}`);
@@ -1776,7 +1841,7 @@ async function checkAndInstallPendingMold(database, uid, unit, machineId, unix, 
     }
 }
 
-async function processDigitalValues(database, uid, unit, type, id, digital_values, unix, _unit, inputs) {
+async function processDigitalValues(database, uid, unit, type, id, digital_values, unix, _unit, inputs, redis = null) {
     const today = getToday(uid, unix, _unit);
     const hour = whatHour(uid, unix, _unit);
     const hourlyReportKey = await ensureHourlyReportKey(database, uid, type, id, today, unix, _unit);
@@ -1841,7 +1906,7 @@ async function processDigitalValues(database, uid, unit, type, id, digital_value
 
     // Call production counting and target checking if type is machines
     if (type === 'machines') {
-        await checkAndInstallPendingMold(database, uid, unit, id, unix, _unit);
+        await checkAndInstallPendingMold(database, uid, unit, id, unix, _unit, redis);
         const timeDiff = _unit.previousUnix ? (unix - _unit.previousUnix) : 0;
         const safeTimeDiff = (timeDiff < 0 || timeDiff > 3600) ? 0 : timeDiff;
 
@@ -1870,17 +1935,15 @@ async function processDigitalValues(database, uid, unit, type, id, digital_value
         if (value === 0) {
             if (_unit.machines?.[id]?.machine_status) {
                 target.timer = (target.timer || 0) + safeTimeDiff;
-                const idleTimeSet = Number(_unit.machines[id].idle_time_set || 0);
+                const idleTimeSet = Math.max(1, Number(_unit.machines[id].idle_time_set || 2));
                 if (target.timer >= idleTimeSet * 60) {
-                    _unit.machines[id].machine_status = false;
-                    target.timer = 0;
                     await turnOff(database, id, uid, unit, false, moment.unix(unix).utc().format('YYYY-MM-DD HH:mm:ss'), unix, _unit);
+                    target.timer = 0;
                 }
             }
         } else {
             target.timer = 0;
             if (!_unit.machines?.[id]?.machine_status) {
-                _unit.machines[id].machine_status = true;
                 await turnOn(database, id, uid, unit, false, moment.unix(unix).utc().format('YYYY-MM-DD HH:mm:ss'), unix, _unit);
             }
         }

@@ -54,9 +54,12 @@ async function lookupMacAndUnit(mac) {
     if (_unitRaw) {
         try {
             const parsed = JSON.parse(_unitRaw);
-            // Check custom TTL of 600s
-            if (parsed && parsed.expiresAt && Date.now() < parsed.expiresAt) {
+            // Check custom TTL of 600s or accept if key is valid in Redis
+            if (parsed && (!parsed.expiresAt || Date.now() < parsed.expiresAt)) {
                 _unit = parsed;
+                if (!_unit.expiresAt) {
+                    _unit.expiresAt = Date.now() + 600 * 1000;
+                }
             } else {
                 // Expired. Clean up.
                 await Promise.all([

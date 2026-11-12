@@ -157,7 +157,111 @@ async function runMoldTests() {
     assert.strictEqual(_unit.machinePendingData[machineId], undefined);
     console.log('✓ Test 4 passed: Immediate install succeeded with 0 RTDB read queries.');
 
-    console.log('--- ALL MOLD INSTALLATION TESTS PASSED! ---');
+    // Setup mock Redis for Tests 5-8
+    const redisStore = {};
+    const mockRedis = {
+        get: async (key) => redisStore[key] || null,
+        set: async (key, val) => { redisStore[key] = val; return 'OK'; },
+        del: async (key) => { delete redisStore[key]; return 1; }
+    };
+
+    // Test 5: Dedicated Redis key recovery when worker in-memory cache was clobbered
+    console.log('Test 5: Dedicated Redis key recovery (race condition immunity)...');
+    const raceUnix = immediateUnix + 120;
+    const raceMold = {
+        installedMold: {
+            name: 'Bottle 1L Mold',
+            cavities: 8,
+            productName: 'Bottle 1L',
+            productColor: 'White',
+            materials: [{ name: 'PET', weight: 40 }]
+        },
+        mold_start_time: raceUnix
+    };
+
+    // Simulate REST API writing to RTDB and dedicated Redis key
+    dbMockData[`users/${uid}/machines/${machineId}/pending_mold`] = raceMold;
+    await mockRedis.set(`pending_mold:${uid}:${machineId}`, JSON.stringify(raceMold));
+
+    // Simulate worker having an EMPTY in-memory machinePendingData (cache clobber simulation)
+    _unit.machinePendingData = {};
+
+    await checkAndInstallPendingMold(mockDb, uid, unit, machineId, raceUnix, _unit, mockRedis);
+
+    assert.strictEqual(dbMockData[`users/${uid}/machines/${machineId}`].installedMold.name, 'Bottle 1L Mold');
+    assert.strictEqual(_unit.machines[machineId].installedMold.name, 'Bottle 1L Mold');
+    assert.strictEqual(_unit.machines[machineId].installedMold.cavities, 8);
+    assert.strictEqual(dbMockData[`users/${uid}/machines/${machineId}/pending_mold`], undefined);
+    assert.strictEqual(await mockRedis.get(`pending_mold:${uid}:${machineId}`), null);
+    console.log('✓ Test 5 passed: Dedicated Redis key successfully prevented race condition loss.');
+
+    // Test 6: Trigger flag recovery via RTDB
+    console.log('Test 6: Trigger flag recovery via RTDB...');
+    const flagUnix = raceUnix + 120;
+    const flagMold = {
+        installedMold: {
+            name: 'Cap Mold 28mm',
+            cavities: 16,
+            productName: 'Cap 28mm',
+            productColor: 'Red',
+            materials: [{ name: 'PP', weight: 3 }]
+        },
+        mold_start_time: flagUnix
+    };
+
+    dbMockData[`users/${uid}/machines/${machineId}/pending_mold`] = flagMold;
+    await mockRedis.set(`has_pending_mold:${uid}:${unit}`, '1');
+    _unit.machinePendingData = {};
+
+    await checkAndInstallPendingMold(mockDb, uid, unit, machineId, flagUnix, _unit, mockRedis);
+
+    assert.strictEqual(dbMockData[`users/${uid}/machines/${machineId}`].installedMold.name, 'Cap Mold 28mm');
+    assert.strictEqual(_unit.machines[machineId].installedMold.name, 'Cap Mold 28mm');
+    assert.strictEqual(_unit.machines[machineId].installedMold.cavities, 16);
+    assert.strictEqual(dbMockData[`users/${uid}/machines/${machineId}/pending_mold`], undefined);
+    assert.strictEqual(await mockRedis.get(`has_pending_mold:${uid}:${unit}`), null);
+    console.log('✓ Test 6 passed: Trigger flag cleanly recovered pending mold with 0 ongoing polling.');
+
+    // Test 7: Hardware RTC clock drift tolerance
+    console.log('Test 7: Clock drift tolerance (mold_start_time slightly ahead of packet timestamp)...');
+    const driftPacketUnix = flagUnix + 120;
+    const driftMoldStartTime = driftPacketUnix + 45; // Dashboard was 45s ahead of packet clock
+    const driftMold = {
+        installedMold: {
+            name: 'Jar 200ml Mold',
+            cavities: 6,
+            productName: 'Jar 200ml',
+            productColor: 'Amber',
+            materials: [{ name: 'PET', weight: 50 }]
+        },
+        mold_start_time: driftMoldStartTime
+    };
+
+    dbMockData[`users/${uid}/machines/${machineId}/pending_mold`] = driftMold;
+    _unit.machinePendingData[machineId] = driftMold;
+
+    // Packet timestamp is driftPacketUnix (45s behind mold_start_time), but tolerance allows immediate install
+    await checkAndInstallPendingMold(mockDb, uid, unit, machineId, driftPacketUnix, _unit, mockRedis);
+
+    assert.strictEqual(dbMockData[`users/${uid}/machines/${machineId}`].installedMold.name, 'Jar 200ml Mold');
+    assert.strictEqual(_unit.machines[machineId].installedMold.name, 'Jar 200ml Mold');
+    console.log('✓ Test 7 passed: Clock drift tolerance enabled instant mold installation.');
+
+    // Test 8: Machine Status & Ontime synchronization (No optimistic memory corruption)
+    console.log('Test 8: Machine status atomic update and error recovery...');
+    _unit.machines[machineId].machine_status = false;
+    dbMockData[`users/${uid}/machines/${machineId}/machine_status`] = false;
+
+    // Normal pulse turns machine ON in both RTDB and memory
+    const pulseUnix = driftPacketUnix + 60;
+    const prodSignalValues = { X1: [{ high: pulseUnix, low: pulseUnix }] };
+    await processDigitalValues(mockDb, uid, unit, 'machines', machineId, prodSignalValues, pulseUnix, _unit, inputs, mockRedis);
+
+    assert.strictEqual(dbMockData[`users/${uid}/machines/${machineId}`].machine_status, true);
+    assert.strictEqual(_unit.machines[machineId].machine_status, true);
+    console.log('✓ Test 8 passed: Machine status synchronized atomically between RTDB and memory.');
+
+    console.log('--- ALL MOLD INSTALLATION & MACHINE STATUS TESTS PASSED! ---');
 }
 
 runMoldTests().catch(err => {
