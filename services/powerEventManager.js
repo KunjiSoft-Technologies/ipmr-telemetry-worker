@@ -44,52 +44,117 @@ async function calculateUnitOff(database, uid, unit, unit_off, unix, _unit) {
             for (const machineKey in _unit?.machines || {}) {
                 const machineObj = _unit.machines[machineKey];
                 const mold = machineObj.installedMold ? machineObj.installedMold.name : machineObj.mold_name;
-                const downtimeFunc = async () => {
-                    try {
-                        if (!_unit.downtimeTrack || typeof _unit.downtimeTrack !== "object") {
-                            _unit.downtimeTrack = {};
-                        }
-                        const openTrack = _unit.downtimeTrack[machineKey];
-                        if (openTrack) {
-                            await database.ref(`users/${uid}/downtime/${machineKey}/${openTrack}/end`).set(unit_off).catch(() => null);
-                            _unit.downtimeTrack[machineKey] = null;
-                        } else {
-                            const snap = await database.ref(`users/${uid}/downtime/${machineKey}`).limitToLast(3).once("value").catch(() => null);
-                            const data = snap ? snap.val() || {} : {};
-                            for (const [k, v] of Object.entries(data)) {
-                                if (!v.end) {
-                                    await database.ref(`users/${uid}/downtime/${machineKey}/${k}/end`).set(unit_off).catch(() => null);
-                                }
-                            }
-                        }
+        const insertMachineShutdownChunks = async (machineKey) => {
+            try {
+                const shiftAStart = Number(_unit?.info?.shift_a_start || 25200);
 
-                        // Chunk the outage hourly
-                        for (let h = startHour; h <= endHour; h++) {
-                            const { startUnix: hStart, endUnix: hEnd } = getHourWindow(uid, today, h, _unit);
-                            const chunkStart = Math.max(unit_off, hStart);
-                            const chunkEnd = Math.min(unix, hEnd);
-                            if (chunkEnd > chunkStart) {
-                                const isOff = isHourOffShift(h, _unit);
-                                const chunkData = {
-                                    start: chunkStart,
-                                    end: chunkEnd,
-                                    status: "OFF"
-                                };
-                                if (isOff) {
-                                    chunkData.reason = {
-                                        category: "off-shift",
-                                        scheduled: true,
-                                        note: "Factory Off-Hours"
-                                    };
-                                }
-                                await database.ref(`users/${uid}/downtime/${machineKey}`).push(chunkData);
-                            }
+                const getShiftSeconds = (u) => {
+                    const dt = moment.unix(u).utc();
+                    const sec = (dt.hours() * 3600) + dt.minutes() * 60 + dt.seconds();
+                    const hoursx = sec <= (shiftAStart + 59) ? 24 + dt.hours() : dt.hours();
+                    return (hoursx * 3600) + dt.minutes() * 60 + dt.seconds();
+                };
+
+                const getShiftDay = (u) => {
+                    const dt = moment.unix(u).utc();
+                    const sec = (dt.hours() * 3600) + dt.minutes() * 60 + dt.seconds();
+                    if (sec <= (shiftAStart + 59)) {
+                        return dt.clone().subtract(1, "days").format("YYYY-MM-DD");
+                    }
+                    return dt.format("YYYY-MM-DD");
+                };
+
+                const offDay = getShiftDay(unit_off);
+                const onDay = getShiftDay(unix);
+                const dayResults = {};
+
+                const addChunk = (day, fromSec, toSec) => {
+                    if (!dayResults[day]) dayResults[day] = [];
+                    let cur = fromSec;
+                    while (cur < toSec) {
+                        const curHour = Math.floor(cur / 3600);
+                        const nextHourBoundary = (curHour + 1) * 3600;
+                        const chunkEnd = Math.min(toSec, nextHourBoundary);
+                        const duration = Math.max(0, chunkEnd - cur);
+                        if (duration > 0) {
+                            dayResults[day].push({
+                                from: cur,
+                                time: chunkEnd,
+                                shutdown_time: duration,
+                                ontime: 0,
+                                offtime: 0,
+                                status: false,
+                                isShutdown: true,
+                                shots: 0,
+                                production: 0,
+                                production_meters: 0,
+                                electricity_usage: 0,
+                                material_usage: 0,
+                                cavities: 0,
+                                mold_name: "N/A",
+                                product: "N/A",
+                                operator: "N/A"
+                            });
                         }
-                    } catch (err) {
-                        console.error("ERROR IN downtimeFunc (sameDay): " + err);
+                        cur = chunkEnd;
                     }
                 };
-                machinePromises.push(downtimeFunc());
+
+                if (offDay === onDay) {
+                    addChunk(offDay, getShiftSeconds(unit_off), getShiftSeconds(unix));
+                } else {
+                    const shiftEndSec = 24 * 3600 + shiftAStart;
+                    addChunk(offDay, getShiftSeconds(unit_off), shiftEndSec);
+
+                    let mid = moment(offDay).add(1, "days");
+                    const onMoment = moment(onDay);
+                    while (mid.isBefore(onMoment, "day")) {
+                        const mDay = mid.format("YYYY-MM-DD");
+                        addChunk(mDay, shiftAStart, shiftEndSec);
+                        mid = mid.add(1, "days");
+                    }
+
+                    addChunk(onDay, shiftAStart, getShiftSeconds(unix));
+                }
+
+                for (const [day, chunks] of Object.entries(dayResults)) {
+                    if (chunks.length === 0) continue;
+                    const hourlyRef = database.ref(`users/${uid}/reports/machines/${machineKey}/hourly/${day}`);
+                    const snap = await hourlyRef.limitToLast(1).once("value").catch(() => null);
+                    let lastKey = -1;
+                    let lastChunk = null;
+                    if (snap && snap.exists()) {
+                        const val = snap.val();
+                        const keys = Object.keys(val);
+                        lastKey = Number(keys[keys.length - 1]);
+                        lastChunk = val[lastKey];
+                    }
+
+                    if (lastChunk && typeof lastChunk.time === "number" && lastChunk.time > chunks[0].from) {
+                        await hourlyRef.child(String(lastKey)).update({ time: chunks[0].from }).catch(() => null);
+                    }
+
+                    let dayShutdownTotal = 0;
+                    for (const chunk of chunks) {
+                        lastKey = Number(lastKey) + 1;
+                        await hourlyRef.child(String(lastKey)).set(chunk).catch(() => null);
+                        dayShutdownTotal += chunk.shutdown_time;
+                    }
+
+                    if (dayShutdownTotal > 0) {
+                        await database.ref(`users/${uid}/reports/machines/${machineKey}/daily/${day}/total/shutdown_time`)
+                            .transaction(curr => (curr || 0) + dayShutdownTotal).catch(() => null);
+                    }
+                }
+
+                if (_unit.hourlyReportData && _unit.hourlyReportData[machineKey]) {
+                    _unit.hourlyReportData[machineKey] = null;
+                }
+            } catch (err) {
+                console.error(`ERROR IN insertMachineShutdownChunks for ${machineKey}:`, err);
+            }
+        };
+                machinePromises.push(insertMachineShutdownChunks(machineKey));
 
                 if (mold && mold !== "NA") {
                     machinePromises.push(
@@ -224,58 +289,7 @@ async function calculateUnitOff(database, uid, unit, unit_off, unix, _unit) {
             for (const machineKey in _unit?.machines || {}) {
                 const machineObj = _unit.machines[machineKey];
                 const mold = machineObj.installedMold ? machineObj.installedMold.name : machineObj.mold_name;
-                const downtimeFunc = async () => {
-                    try {
-                        if (!_unit.downtimeTrack || typeof _unit.downtimeTrack !== "object") {
-                            _unit.downtimeTrack = {};
-                        }
-                        const openTrack = _unit.downtimeTrack[machineKey];
-                        if (openTrack) {
-                            await database.ref(`users/${uid}/downtime/${machineKey}/${openTrack}/end`).set(unit_off).catch(() => null);
-                            _unit.downtimeTrack[machineKey] = null;
-                        } else {
-                            const snap = await database.ref(`users/${uid}/downtime/${machineKey}`).limitToLast(3).once("value").catch(() => null);
-                            const data = snap ? snap.val() || {} : {};
-                            for (const [k, v] of Object.entries(data)) {
-                                if (!v.end) {
-                                    await database.ref(`users/${uid}/downtime/${machineKey}/${k}/end`).set(unit_off).catch(() => null);
-                                }
-                            }
-                        }
-
-                        // Chunk the outage hourly across days
-                        for (let d = 0; d <= daysDiff; d++) {
-                            const day = moment(startDay).add(d, "days").format("YYYY-MM-DD");
-                            const dStartHour = (d === 0 ? startHour : 1);
-                            const dEndHour = (d === daysDiff ? endHour : 24);
-
-                            for (let h = dStartHour; h <= dEndHour; h++) {
-                                const { startUnix: hStart, endUnix: hEnd } = getHourWindow(uid, day, h, _unit);
-                                const chunkStart = Math.max(unit_off, hStart);
-                                const chunkEnd = Math.min(unix, hEnd);
-                                if (chunkEnd > chunkStart) {
-                                    const isOff = isHourOffShift(h, _unit);
-                                    const chunkData = {
-                                        start: chunkStart,
-                                        end: chunkEnd,
-                                        status: "OFF"
-                                    };
-                                    if (isOff) {
-                                        chunkData.reason = {
-                                            category: "off-shift",
-                                            scheduled: true,
-                                            note: "Factory Off-Hours"
-                                        };
-                                    }
-                                    await database.ref(`users/${uid}/downtime/${machineKey}`).push(chunkData);
-                                }
-                            }
-                        }
-                    } catch (err) {
-                        console.error("ERROR IN downtimeFunc (multiDay): " + err);
-                    }
-                };
-                machinePromises.push(downtimeFunc());
+                machinePromises.push(insertMachineShutdownChunks(machineKey));
 
                 if (mold && mold !== "NA") {
                     machinePromises.push(
