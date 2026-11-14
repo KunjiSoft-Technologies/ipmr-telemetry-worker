@@ -102,6 +102,12 @@ function normalizePayload(raw) {
                         if (standardParam === 'POWER_FACTOR' && typeof val === 'number' && Math.abs(val) > 1.0) {
                             val = val / 1000;
                         }
+                        if ((standardParam === 'POWER' || standardParam === 'ACTIVE_POWER' || standardParam === 'APPARENT_POWER') && typeof val === 'number') {
+                            // Modbus 16-bit signed integer overflow correction (values wrapping above 32767 to negative)
+                            if (val < 0 && val >= -32768) {
+                                val = val + 65536;
+                            }
+                        }
                         mappedObj[standardStat] = val;
                     }
                     if (mappedObj.min === undefined) {
@@ -115,6 +121,12 @@ function normalizePayload(raw) {
                     let val = pvObj;
                     if (standardParam === 'POWER_FACTOR' && typeof val === 'number' && Math.abs(val) > 1.0) {
                         val = val / 1000;
+                    }
+                    if ((standardParam === 'POWER' || standardParam === 'ACTIVE_POWER' || standardParam === 'APPARENT_POWER') && typeof val === 'number') {
+                        // Modbus 16-bit signed integer overflow correction (values wrapping above 32767 to negative)
+                        if (val < 0 && val >= -32768) {
+                            val = val + 65536;
+                        }
                     }
                     pData[standardParam] = val;
                 }

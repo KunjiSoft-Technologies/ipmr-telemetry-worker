@@ -669,6 +669,26 @@ async function countElectricity(database, uid, unit, type, name, value, time, un
     const isEQ = type === 'equipments';
     const today = getToday(uid, unix, _unit);
     const hourIndex = whatHour(uid, unix, _unit);
+
+    // Safety cap: discard physically impossible electricity spikes (> 50 kWh per packet)
+    value = Number(value);
+    if (value > 50000 || isNaN(value) || value < 0) {
+        if (value > 0) {
+            console.warn(`[countElectricity] Rejected anomalous electricity value: ${value} Wh for ${type}/${name}`);
+        }
+        value = 0;
+    }
+
+    const safeAccumulatorIncrements = {};
+    for (const [param, inc] of Object.entries(accumulatorIncrements)) {
+        const numInc = Number(inc);
+        if (Number.isFinite(numInc) && numInc >= 0 && numInc <= 50) {
+            safeAccumulatorIncrements[param] = numInc;
+        } else if (numInc > 50) {
+            console.warn(`[countElectricity] Rejected anomalous accumulator increment: ${inc} kWh for ${param} on ${type}/${name}`);
+        }
+    }
+    accumulatorIncrements = safeAccumulatorIncrements;
     const hasAccumulators = Object.keys(accumulatorIncrements).length > 0;
 
     if (isEQ) {
@@ -677,7 +697,11 @@ async function countElectricity(database, uid, unit, type, name, value, time, un
         const division = Number(equipmentObj.division || 1);
         
         // Convert Watthour (Wh) from packet to Kilowatthour (kWh) for DB storage
-        const electricity_consumption = value / 1000;
+        let electricity_consumption = value / 1000;
+        if (electricity_consumption > 50 || isNaN(electricity_consumption) || electricity_consumption < 0) {
+            console.warn(`[countElectricity] Rejected anomalous electricity consumption: ${electricity_consumption} kWh (${value} Wh) for ${type}/${name}`);
+            electricity_consumption = 0;
+        }
         
         const time_in_h = time > 0 ? time / 3600 : 0;
         const realtime_kw_mn = time_in_h > 0 ? electricity_consumption / time_in_h : 0;
@@ -695,6 +719,10 @@ async function countElectricity(database, uid, unit, type, name, value, time, un
 
         if (hasAccumulators) {
             for (const [param, inc] of Object.entries(accumulatorIncrements)) {
+                if (inc > 50 || isNaN(inc) || inc < 0) {
+                    console.warn(`[countElectricity] Rejected anomalous accumulator increment: ${inc} kWh for ${param} on ${type}/${name}`);
+                    continue;
+                }
                 stats[`accumulators/${param}`] = admin.database.ServerValue.increment(inc);
             }
         }
@@ -835,7 +863,11 @@ async function countElectricity(database, uid, unit, type, name, value, time, un
         const division = Number(machineObj.division || 1);
         
         // Convert Watthour (Wh) from packet to Kilowatthour (kWh) for DB storage
-        const electricity_consumption = value / 1000;
+        let electricity_consumption = value / 1000;
+        if (electricity_consumption > 50 || isNaN(electricity_consumption) || electricity_consumption < 0) {
+            console.warn(`[countElectricity] Rejected anomalous electricity consumption: ${electricity_consumption} kWh (${value} Wh) for ${type}/${name}`);
+            electricity_consumption = 0;
+        }
         
         const time_in_h = time > 0 ? time / 3600 : 0;
         const realtime_kw_mn = time_in_h > 0 ? electricity_consumption / time_in_h : 0;
@@ -858,6 +890,10 @@ async function countElectricity(database, uid, unit, type, name, value, time, un
 
         if (hasAccumulators) {
             for (const [param, inc] of Object.entries(accumulatorIncrements)) {
+                if (inc > 50 || isNaN(inc) || inc < 0) {
+                    console.warn(`[countElectricity] Rejected anomalous accumulator increment: ${inc} kWh for ${param} on ${type}/${name}`);
+                    continue;
+                }
                 stats[`accumulators/${param}`] = admin.database.ServerValue.increment(inc);
             }
         }
@@ -1338,7 +1374,22 @@ async function processPhaseValues(database, uid, unit, type, id, phase_values, u
 
                             // Rule 4: Normal case - incoming value is greater than previous raw value
                             if (incomingValue > dbRawValue) {
-                                incrementBy = incomingValue - dbRawValue;
+                                const rawDelta = incomingValue - dbRawValue;
+
+                                // Guard against anomalous jumps / baseline desynchronization:
+                                // In a standard 30s-60s telemetry packet, an increment > 50,000 Wh (50 kWh = 6,000 kW load)
+                                // is physically impossible for industrial machines and indicates a sensor baseline mismatch or unaligned state.
+                                const MAX_PLAUSIBLE_WH_INCREMENT = 50000; // 50 kWh
+                                if (rawDelta > MAX_PLAUSIBLE_WH_INCREMENT) {
+                                    console.warn(`[AccumulatorGuard] Detected anomalous jump of ${rawDelta} Wh on ${param} for ${type}/${id}. Raw jump from ${dbRawValue} to ${incomingValue}. Re-anchoring raw baseline without incrementing lifetime.`);
+                                    incrementBy = 0;
+                                    return {
+                                        raw: incomingValue,
+                                        lifetime: dbLifetimeValue
+                                    };
+                                }
+
+                                incrementBy = rawDelta;
                                 return {
                                     raw: incomingValue,
                                     lifetime: dbLifetimeValue + incrementBy
