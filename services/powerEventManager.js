@@ -26,24 +26,6 @@ async function calculateUnitOff(database, uid, unit, unit_off, unix, _unit) {
         const endHour = whatHour(uid, unix, _unit);
         const sameDay = today === startDay;
 
-        if (sameDay) {
-            const offDuration = Math.max(0, unix - unit_off);
-            if (offDuration <= 0) return;
-            const promises = [
-                database.ref(`users/${uid}/reports/factory/daily/${today}/unit_power/${unit}/sessions`).push({
-                    off: unit_off,
-                    on: unix
-                }),
-                database.ref(`users/${uid}/reports/factory/daily/${today}/unit_power/${unit}/total`).set(
-                    admin.database.ServerValue.increment(offDuration)
-                )
-            ];
-            await Promise.all(promises);
-
-            const machinePromises = [];
-            for (const machineKey in _unit?.machines || {}) {
-                const machineObj = _unit.machines[machineKey];
-                const mold = machineObj.installedMold ? machineObj.installedMold.name : machineObj.mold_name;
         const insertMachineShutdownChunks = async (machineKey) => {
             try {
                 const shiftAStart = Number(_unit?.info?.shift_a_start || 25200);
@@ -154,6 +136,25 @@ async function calculateUnitOff(database, uid, unit, unit_off, unix, _unit) {
                 console.error(`ERROR IN insertMachineShutdownChunks for ${machineKey}:`, err);
             }
         };
+
+        if (sameDay) {
+            const offDuration = Math.max(0, unix - unit_off);
+            if (offDuration <= 0) return;
+            const promises = [
+                database.ref(`users/${uid}/reports/factory/daily/${today}/unit_power/${unit}/sessions`).push({
+                    off: unit_off,
+                    on: unix
+                }),
+                database.ref(`users/${uid}/reports/factory/daily/${today}/unit_power/${unit}/total`).set(
+                    admin.database.ServerValue.increment(offDuration)
+                )
+            ];
+            await Promise.all(promises);
+
+            const machinePromises = [];
+            for (const machineKey in _unit?.machines || {}) {
+                const machineObj = _unit.machines[machineKey];
+                const mold = machineObj.installedMold ? machineObj.installedMold.name : machineObj.mold_name;
                 machinePromises.push(insertMachineShutdownChunks(machineKey));
 
                 if (mold && mold !== "NA") {
