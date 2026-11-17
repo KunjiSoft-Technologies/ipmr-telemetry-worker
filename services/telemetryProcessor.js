@@ -1431,6 +1431,56 @@ async function processPhaseValues(database, uid, unit, type, id, phase_values, u
 
                 await Promise.all(txPromises);
 
+                // Apply per-machine kphase reactive energy correction:
+                // ΔWh_corrected = ΔWh_raw + (kphase * ΔVarh_raw)
+                if (type === 'machines') {
+                    let kphase = Number(_unit?.machines?.[id]?.kphase);
+                    if (!Number.isFinite(kphase)) {
+                        try {
+                            const kSnap = await database.ref(`users/${uid}/machines/${id}/kphase`).once('value');
+                            kphase = Number(kSnap.val() || 0);
+                            if (!_unit.machines) _unit.machines = {};
+                            if (!_unit.machines[id]) _unit.machines[id] = {};
+                            _unit.machines[id].kphase = kphase;
+                        } catch (e) {
+                            kphase = 0;
+                        }
+                    }
+
+                    if (kphase > 0) {
+                        const reactiveDelta = (increments['SUM_VarH_Total'] > 0 ? increments['SUM_VarH_Total'] : (increments['SUM_VarH_Ind'] || 0));
+                        const whCorrection = reactiveDelta > 0 ? (kphase * reactiveDelta) : 0;
+
+                        if (whCorrection > 0) {
+                            if (increments['SUM_WH_Total'] !== undefined) {
+                                increments['SUM_WH_Total'] += whCorrection;
+                            }
+                            if (increments['SUM_WH_Import'] !== undefined) {
+                                increments['SUM_WH_Import'] += whCorrection;
+                            }
+
+                            // Keep lifetime accumulators in sync so Power Analyzer gauges match Machine Report
+                            const activeParamsToAdjust = ['SUM_WH_Total', 'SUM_WH_Import'].filter(p => increments[p] !== undefined);
+                            await Promise.all(activeParamsToAdjust.map(async (param) => {
+                                try {
+                                    await Promise.all([
+                                        database.ref(`users/${uid}/reports/${type}/${id}/accumulators/${param}`).transaction(cur => {
+                                            const num = Number(cur);
+                                            return (Number.isFinite(num) ? num : 0) + whCorrection;
+                                        }),
+                                        database.ref(`users/${uid}/reports/${type}/${id}/accumulators_state/${param}/lifetime`).transaction(cur => {
+                                            const num = Number(cur);
+                                            return (Number.isFinite(num) ? num : 0) + whCorrection;
+                                        })
+                                    ]);
+                                } catch (err) {
+                                    console.error(`[kphase] Error syncing accumulator lifetime for ${type}/${id}/${param}:`, err);
+                                }
+                            }));
+                        }
+                    }
+                }
+
                 // Prioritize SUM_WH_Total, fallback to SUM_WH_Import for countElectricity to avoid double counting
                 let electricityIncrement = 0;
                 if (increments['SUM_WH_Total'] > 0) {
