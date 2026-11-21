@@ -1447,30 +1447,29 @@ async function processPhaseValues(database, uid, unit, type, id, phase_values, u
                         }
                     }
 
-                    if (kphase > 0) {
+                    if (kphase !== 0) {
                         const reactiveDelta = (increments['SUM_VarH_Total'] > 0 ? increments['SUM_VarH_Total'] : (increments['SUM_VarH_Ind'] || 0));
                         const whCorrection = reactiveDelta > 0 ? (kphase * reactiveDelta) : 0;
 
-                        if (whCorrection > 0) {
-                            if (increments['SUM_WH_Total'] !== undefined) {
-                                increments['SUM_WH_Total'] += whCorrection;
-                            }
-                            if (increments['SUM_WH_Import'] !== undefined) {
-                                increments['SUM_WH_Import'] += whCorrection;
-                            }
-
+                        if (whCorrection !== 0) {
                             // Keep lifetime accumulators in sync so Power Analyzer gauges match Machine Report
                             const activeParamsToAdjust = ['SUM_WH_Total', 'SUM_WH_Import'].filter(p => increments[p] !== undefined);
                             await Promise.all(activeParamsToAdjust.map(async (param) => {
+                                const prevInc = increments[param];
+                                const nextInc = Math.max(0, prevInc + whCorrection);
+                                const appliedDelta = nextInc - prevInc;
+                                increments[param] = nextInc;
+                                if (appliedDelta === 0) return;
+
                                 try {
                                     await Promise.all([
                                         database.ref(`users/${uid}/reports/${type}/${id}/accumulators/${param}`).transaction(cur => {
                                             const num = Number(cur);
-                                            return (Number.isFinite(num) ? num : 0) + whCorrection;
+                                            return Math.max(0, (Number.isFinite(num) ? num : 0) + appliedDelta);
                                         }),
                                         database.ref(`users/${uid}/reports/${type}/${id}/accumulators_state/${param}/lifetime`).transaction(cur => {
                                             const num = Number(cur);
-                                            return (Number.isFinite(num) ? num : 0) + whCorrection;
+                                            return Math.max(0, (Number.isFinite(num) ? num : 0) + appliedDelta);
                                         })
                                     ]);
                                 } catch (err) {

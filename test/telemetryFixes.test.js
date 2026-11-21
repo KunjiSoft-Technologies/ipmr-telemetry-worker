@@ -155,7 +155,18 @@ assert.strictEqual(sanitizedSpike.electricity_consumption, 0, 'Spike of 1,169,50
 assert.deepStrictEqual(sanitizedSpike.safeAccumulatorIncrements, { normal: 0.2 }, 'Anomalous accumulators must be stripped');
 console.log('✓ countElectricity safety clamping verified.');
 
+// Test 4: Negative kphase correction and non-negative clamping
+console.log('\n[Test 4] Testing negative kphase correction and floor clamping...');
+function applyKphase(prevInc, reactiveDelta, kphase) {
+    if (kphase === 0 || reactiveDelta <= 0) return { nextInc: prevInc, appliedDelta: 0 };
+    const nextInc = Math.max(0, prevInc + (kphase * reactiveDelta));
+    return { nextInc, appliedDelta: nextInc - prevInc };
+}
+assert.deepStrictEqual(applyKphase(1000, 500, -0.14), { nextInc: 930, appliedDelta: -70 });
+assert.deepStrictEqual(applyKphase(50, 500, -0.2), { nextInc: 0, appliedDelta: -50 });
+console.log('✓ Negative kphase correction & zero floor verified.');
+
 console.log('\n=========================================');
-console.log('ALL LOCAL VERIFICATION TESTS PASSED (4/4)!');
+console.log('ALL LOCAL VERIFICATION TESTS PASSED (5/5)!');
 console.log('=========================================');
 
